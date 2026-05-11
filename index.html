@@ -8,17 +8,19 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=20260502e">
+    <link rel="stylesheet" href="styles.css?v=20260510ac">
     <script>
     /* ── Lightweight low-end detector + scroll/nav pause ── */
     (function(){
         try {
             var nav = navigator || {};
+            var ua  = (nav.userAgent || '').toLowerCase();
             var cores = nav.hardwareConcurrency || 8;
             var mem   = nav.deviceMemory || 4;
             var conn  = nav.connection || nav.webkitConnection || {};
@@ -35,6 +37,18 @@
             var isTouch = ('ontouchstart' in window) || (nav.maxTouchPoints > 0);
             if (isTouch && Math.min(screen.width||9999, screen.height||9999) < 900) {
                 document.documentElement.classList.add('mid-fx');
+            }
+            /* ANDROID-FX: Android Chromium WebView внутри Telegram плохо тянет
+               стек из нескольких backdrop-filter одновременно (это даёт мерцания
+               и фризы независимо от железа). Включаем агрессивный фолбэк. */
+            var isAndroid = /android/.test(ua);
+            if (isAndroid) {
+                document.documentElement.classList.add('android-fx');
+                document.documentElement.classList.add('mid-fx');
+                /* Совсем слабые Android-телефоны → low-fx */
+                if (cores <= 6 && mem <= 4) {
+                    document.documentElement.classList.add('low-fx');
+                }
             }
             /* Pause CSS animations while tab is hidden */
             document.addEventListener('visibilitychange', function(){
@@ -170,6 +184,10 @@
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 1 1 12 0v4.2l1.4 2.3a1 1 0 0 1-.86 1.5H5.46a1 1 0 0 1-.86-1.5L6 13.2V9"></path><path d="M10 18a2 2 0 0 0 4 0"></path></svg>
                                 <span class="header-badge hidden" id="notifications-badge">0</span>
                             </button>
+                            <button class="header-action-btn header-action-sfx" id="sfx-toggle-btn" type="button" aria-label="Sound" aria-pressed="true">
+                                <svg class="sfx-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
+                                <svg class="sfx-icon-off hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+                            </button>
                             <div class="language-menu" id="language-menu" aria-label="Language switcher">
                                 <button class="language-trigger" id="language-trigger" type="button" aria-expanded="false" aria-controls="language-dropdown">
                                     <span class="language-trigger-label">LANG</span>
@@ -200,7 +218,184 @@
             </div>
         </header>
 
-        <section class="profile-panel panel app-view section-enter">
+        <!-- ═══════════════════════════════════════════════════════════════
+             HOME (главная) — visual hub with active hero
+             ═══════════════════════════════════════════════════════════════ -->
+        <section id="home-section" class="home-section panel app-view section-enter home-v2">
+            <!-- Aurora background orbs -->
+            <div class="home-aurora" aria-hidden="true">
+                <span class="home-aurora-orb home-aurora-1"></span>
+                <span class="home-aurora-orb home-aurora-2"></span>
+                <span class="home-aurora-orb home-aurora-3"></span>
+            </div>
+
+            <!-- ──────── HEADER (unified) ──────── -->
+            <header class="home-head">
+                <button class="home-profile-chip" id="home-profile-chip" type="button" aria-label="Profile">
+                    <span class="home-profile-avatar" id="home-profile-avatar">
+                        <span id="home-profile-initials">··</span>
+                    </span>
+                    <span class="home-profile-info">
+                        <span class="home-profile-name" id="home-profile-name">RoboNexus</span>
+                        <span class="home-profile-meta">
+                            <span class="hp-lvl"><span class="hp-lvl-tag">LVL</span> <span id="home-profile-lvl-num">1</span></span>
+                            <span class="hp-sep">·</span>
+                            <span class="hp-online"><span class="hp-online-dot" aria-hidden="true"></span><span id="home-online-num">0</span></span>
+                        </span>
+                    </span>
+                </button>
+                <div class="home-head-actions">
+                    <button class="home-head-btn home-head-streak" type="button" data-home-action="streak" aria-label="Streak">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M13.5 1.5c.5 3.4 4 5 4 9 0 4.4-3.4 7.5-7.5 7.5S2.5 14.9 2.5 10.5c0-2.4 1.4-4 1.4-4S5 8 6.5 8c0-3.5 3-5 7-6.5z"/></svg>
+                        <span class="home-head-num" id="home-tile-streak-val">0</span>
+                    </button>
+                    <button class="home-head-btn home-head-notify" id="home-notify-btn" type="button" aria-label="Notifications">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 1 1 12 0v4.2l1.4 2.3a1 1 0 0 1-.86 1.5H5.46a1 1 0 0 1-.86-1.5L6 13.2V9"/><path d="M10 18a2 2 0 0 0 4 0"/></svg>
+                        <span class="home-head-dot hidden" id="home-notify-dot"></span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- ──────── BALANCE ROW ──────── -->
+            <div class="home-bal-row">
+                <button class="home-bal home-bal-ton" type="button" data-home-action="balance-ton">
+                    <span class="home-bal-glyph" aria-hidden="true">
+                        <svg viewBox="0 0 32 32" width="22" height="22"><defs><linearGradient id="hbTonG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7dd3fc"/><stop offset="1" stop-color="#0284c7"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="url(#hbTonG)"/><circle cx="16" cy="16" r="14" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1"/><path fill="#fff" d="M9.5 11.2h13a1 1 0 0 1 .85 1.52l-6.5 10.6a1 1 0 0 1-1.7 0l-6.5-10.6a1 1 0 0 1 .85-1.52zm2.2 1.8 4.3 7.05 4.3-7.05h-8.6z"/><ellipse cx="13" cy="9" rx="5" ry="2" fill="rgba(255,255,255,.35)"/></svg>
+                    </span>
+                    <span class="home-bal-body">
+                        <span class="home-bal-lbl">TON</span>
+                        <strong class="home-bal-val" id="home-bal-ton-value">0.00</strong>
+                    </span>
+                    <span class="home-bal-arrow" aria-hidden="true">＋</span>
+                </button>
+                <button class="home-bal home-bal-rnx" type="button" data-home-action="balance-rnx">
+                    <span class="home-bal-glyph" aria-hidden="true">
+                        <svg viewBox="0 0 32 32" width="22" height="22"><defs><linearGradient id="hbRnxG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c4b5fd"/><stop offset="1" stop-color="#6d28d9"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="url(#hbRnxG)"/><circle cx="16" cy="16" r="14" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1"/><path fill="#fff" d="M17.4 6 9.6 17h5l-1.2 9 8.8-12h-5.2l1.4-8z"/><ellipse cx="13" cy="9" rx="5" ry="2" fill="rgba(255,255,255,.35)"/></svg>
+                    </span>
+                    <span class="home-bal-body">
+                        <span class="home-bal-lbl">$RNX</span>
+                        <strong class="home-bal-val" id="home-bal-rnx-value">0</strong>
+                    </span>
+                    <span class="home-bal-arrow" aria-hidden="true">＋</span>
+                </button>
+            </div>
+
+            <!-- ──────── HERO STAGE with side actions ──────── -->
+            <div class="home-stage" id="home-stage" data-rarity="common">
+                <div class="home-stage-floor-glow" aria-hidden="true"></div>
+                <div class="home-stage-glow" aria-hidden="true"></div>
+                <div class="home-stage-rays" aria-hidden="true"></div>
+
+                <div class="home-mission" aria-label="План дня">
+                    <div class="home-mission-head">
+                        <span class="home-mission-kicker" id="home-mission-kicker">ПЛАН ДНЯ</span>
+                        <strong class="home-mission-title" id="home-mission-title">Получите первого героя</strong>
+                    </div>
+                    <div class="home-mission-steps">
+                        <button class="home-mission-step is-primary" type="button" data-home-action="shop">
+                            <span class="home-mission-dot" aria-hidden="true"></span>
+                            <span class="home-mission-text" id="home-mission-hero-status">Герой 0/1</span>
+                        </button>
+                        <button class="home-mission-step" type="button" data-home-action="tasks">
+                            <span class="home-mission-dot" aria-hidden="true"></span>
+                            <span class="home-mission-text" id="home-mission-task-status">Квесты 0</span>
+                        </button>
+                        <button class="home-mission-step" type="button" data-home-action="streak">
+                            <span class="home-mission-dot" aria-hidden="true"></span>
+                            <span class="home-mission-text" id="home-mission-streak-status">Серия 1</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Side actions left -->
+                <div class="home-side home-side-left">
+                    <button class="home-side-btn home-side-rating" type="button" data-home-action="rating" aria-label="Top">
+                        <span class="home-side-ico">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M17 4h3v3a4 4 0 0 1-4 4M7 4H4v3a4 4 0 0 0 4 4M17 4H7v6a5 5 0 0 0 10 0V4z"/></svg>
+                        </span>
+                        <span class="home-side-lbl" data-home-tr="rating">ТОП</span>
+                    </button>
+                    <button class="home-side-btn home-side-history" type="button" data-home-action="history" aria-label="History">
+                        <span class="home-side-ico">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 2"/><path d="M3.05 11A9 9 0 1 1 12 21"/><polyline points="3 4 3 10 9 10"/></svg>
+                        </span>
+                        <span class="home-side-lbl" data-home-tr="history">ИСТОРИЯ</span>
+                    </button>
+                </div>
+
+                <!-- Side actions right -->
+                <div class="home-side home-side-right">
+                    <button class="home-side-btn home-side-tasks" type="button" data-home-action="tasks" aria-label="Задания">
+                        <span class="home-side-ico">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l2 2 4-4"/><path d="M9 17h6"/><path d="M8 3h8l2 3v13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6l2-3z"/></svg>
+                        </span>
+                        <span class="home-side-lbl" data-home-tr="tasks">ЗАДАНИЯ</span>
+                    </button>
+                    <button class="home-side-btn home-side-friends" type="button" data-home-action="referral" aria-label="Friends">
+                        <span class="home-side-ico">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        </span>
+                        <span class="home-side-lbl" data-home-tr="friends">ДРУЗЬЯ</span>
+                    </button>
+                </div>
+
+                <!-- Hero center -->
+                <button class="home-hero-pedestal" id="home-hero-pedestal" type="button" aria-label="Change hero">
+                    <div class="home-hero-disk" aria-hidden="true"></div>
+                    <model-viewer
+                        class="home-hero-mv"
+                        id="home-hero-mv"
+                        src="images/textured_mesh.glb"
+                        alt="Hero"
+                        interaction-prompt="none"
+                        disable-zoom
+                        disable-pan
+                        disable-tap
+                        shadow-intensity="0.7"
+                        shadow-softness="1"
+                        exposure="2.0"
+                        tone-mapping="aces"
+                        environment-image="legacy"
+                        camera-orbit="0deg 82deg 4.6m"
+                        min-camera-orbit="0deg 82deg 4.6m"
+                        max-camera-orbit="0deg 82deg 4.6m"
+                        field-of-view="28deg"
+                        min-field-of-view="28deg"
+                        max-field-of-view="28deg"
+                        camera-target="0m -0.15m 0m"
+                        loading="eager"
+                        reveal="auto"
+                    ></model-viewer>
+                    <img class="home-hero-img home-hero-img-fallback" id="home-hero-img" src="images/hero_omega_titan.png" alt="" loading="eager" decoding="async" hidden>
+                    <div class="home-hero-shadow" aria-hidden="true"></div>
+                </button>
+
+                <!-- Hero name plate -->
+                <div class="home-hero-plate" id="home-hero-badge">
+                    <span class="home-hero-name" id="home-hero-name">Omega Titan</span>
+                    <span class="home-hero-dot" aria-hidden="true">·</span>
+                    <span class="home-hero-role" id="home-hero-role">Титан</span>
+                    <span class="home-hero-swap" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                    </span>
+                </div>
+            </div>
+
+            <!-- ──────── HERO PICKER OVERLAY ──────── -->
+            <div class="home-picker hidden" id="home-picker" role="dialog" aria-modal="true" aria-hidden="true">
+                <div class="home-picker-back" id="home-picker-back"></div>
+                <div class="home-picker-card">
+                    <div class="home-picker-head">
+                        <h3 class="home-picker-title" data-home-tr="pickHero">Выберите героя</h3>
+                        <button class="home-picker-close" id="home-picker-close" type="button" aria-label="Close">×</button>
+                    </div>
+                    <p class="home-picker-hint" id="home-picker-hint" data-home-tr="pickHeroHint">Этот герой будет показан на главном экране</p>
+                    <div class="home-picker-grid" id="home-picker-grid"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="profile-panel panel app-view section-enter hidden">
 
             <!-- ─── HERO CARD ─── -->
             <div class="prf-hero-card">
@@ -651,17 +846,17 @@
             </span>
             <span class="nav-label" data-translate="mines">Герои</span>
         </button>
-        <button class="nav-btn active" type="button" data-nav="profile" data-nav-index="2">
+        <button class="nav-btn active" type="button" data-nav="home" data-nav-index="2">
             <span class="nav-icon-wrap">
-                <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.58-7 8-7s8 3 8 7"/></svg>
+                <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/></svg>
             </span>
-            <span class="nav-label" data-translate="profile">Профиль</span>
+            <span class="nav-label" data-translate="home">Главная</span>
         </button>
         <button class="nav-btn" type="button" data-nav="stats" data-nav-index="3">
             <span class="nav-icon-wrap">
                 <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
             </span>
-            <span class="nav-label">Статистика</span>
+            <span class="nav-label" data-translate="stats">Статистика</span>
         </button>
         <button class="nav-btn" type="button" data-nav="menu" data-nav-index="4">
             <span class="nav-icon-wrap">
@@ -964,11 +1159,11 @@
                     <div class="deposit-step-dot">3</div>
                 </div>
                 <div class="form-field">
-                    <label id="deposit-amount-label">СУМА (5-10000 TON)</label>
+                    <label id="deposit-amount-label">Сумма (5-10000 TON)</label>
                     <input type="number" id="deposit-amount-input" placeholder="5" min="5" />
                 </div>
                 <div class="form-field">
-                    <label>СПОСІБ</label>
+                    <label id="deposit-method-label">Способ</label>
                     <div class="deposit-method-grid" id="deposit-method-grid"></div>
                 </div>
                 <button class="action-btn deposit-next-btn" id="deposit-step1-next" type="button">Далее →</button>
@@ -990,33 +1185,33 @@
                         <circle cx="30" cy="30" r="26" class="deposit-timer-arc" id="deposit-timer-arc"/>
                     </svg>
                     <div class="deposit-timer-text" id="deposit-timer-text">15:00</div>
-                    <div class="deposit-timer-label">осталось</div>
+                    <div class="deposit-timer-label" id="deposit-timer-label">осталось</div>
                 </div>
 
                 <div class="deposit-amount-badge">
-                    <span class="deposit-amount-badge-label">К оплате</span>
+                    <span class="deposit-amount-badge-label" id="deposit-amount-badge-label">К оплате</span>
                     <span class="deposit-amount-badge-value" id="deposit-amount-badge-value">— TON</span>
                 </div>
 
                 <div class="deposit-payment-card">
                     <div class="deposit-payment-row">
-                        <span class="deposit-payment-key">Сеть</span>
+                        <span class="deposit-payment-key" id="deposit-payment-method-label">Сеть</span>
                         <span class="deposit-payment-val" id="deposit-payment-method">—</span>
                     </div>
                     <div class="deposit-payment-row">
-                        <span class="deposit-payment-key">Код платежа</span>
+                        <span class="deposit-payment-key" id="deposit-payment-code-label">Код платежа</span>
                         <div class="deposit-code-wrap">
                             <span class="deposit-payment-val deposit-payment-code" id="deposit-payment-code">—</span>
-                            <button class="deposit-copy-btn" id="deposit-code-copy" type="button" title="Копіювати">
+                            <button class="deposit-copy-btn" id="deposit-code-copy" type="button" title="Копировать">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                             </button>
                         </div>
                     </div>
                     <div class="deposit-payment-row">
-                        <span class="deposit-payment-key">Адрес</span>
+                        <span class="deposit-payment-key" id="deposit-wallet-label">Адрес</span>
                         <div class="deposit-code-wrap">
                             <span class="deposit-payment-val deposit-wallet-addr" id="deposit-wallet-addr">—</span>
-                            <button class="deposit-copy-btn" id="deposit-wallet-copy" type="button" title="Копіювати">
+                            <button class="deposit-copy-btn" id="deposit-wallet-copy" type="button" title="Копировать">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                             </button>
                         </div>
@@ -1025,7 +1220,7 @@
 
                 <div class="deposit-qr-wrap">
                     <img class="deposit-qr-img" id="deposit-qr-img" src="" alt="QR" />
-                    <span class="deposit-qr-hint">Сканируй QR для быстрой оплаты</span>
+                    <span class="deposit-qr-hint" id="deposit-qr-hint">Сканируйте QR для быстрой оплаты</span>
                 </div>
 
                 <div class="deposit-step2-actions">
@@ -1046,12 +1241,12 @@
                 <div class="deposit-success-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="48" height="48"><polyline points="20 6 9 17 4 12"/></svg>
                 </div>
-                <h4 class="deposit-success-title">Заявка отправлена!</h4>
-                <p class="deposit-success-sub">Мы получили вашу заявку на пополнение. После проверки транзакции баланс будет зачислен.</p>
+                <h4 class="deposit-success-title" id="deposit-success-title">Заявка отправлена!</h4>
+                <p class="deposit-success-sub" id="deposit-success-sub">Мы получили вашу заявку на пополнение. После проверки транзакции баланс будет зачислен.</p>
                 <div class="deposit-success-meta">
-                    <div class="deposit-success-row"><span>Сумма</span><strong id="deposit-success-amount">—</strong></div>
-                    <div class="deposit-success-row"><span>Метод</span><strong id="deposit-success-method">—</strong></div>
-                    <div class="deposit-success-row"><span>Код</span><strong id="deposit-success-code">—</strong></div>
+                    <div class="deposit-success-row"><span id="deposit-success-amount-label">Сумма</span><strong id="deposit-success-amount">—</strong></div>
+                    <div class="deposit-success-row"><span id="deposit-success-method-label">Метод</span><strong id="deposit-success-method">—</strong></div>
+                    <div class="deposit-success-row"><span id="deposit-success-code-label">Код</span><strong id="deposit-success-code">—</strong></div>
                 </div>
                 <button class="action-btn" id="deposit-step3-close" type="button">Закрыть</button>
             </div>
@@ -1219,6 +1414,6 @@
 
     <script src="db_config.js"></script>
     <script src="database.js"></script>
-    <script src="script.js?v=20260502e"></script>
+    <script src="script.js?v=20260510g"></script>
 </body>
 </html>

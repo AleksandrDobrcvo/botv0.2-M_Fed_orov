@@ -235,6 +235,7 @@ class GameDatabase {
                 price
             }))),
             image: source.image || '',
+            model: source.model || template?.model || '',
             isTestHero,
             source: source.source || 'shop',
             grantedByAdmin: Boolean(source.grantedByAdmin),

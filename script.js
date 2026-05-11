@@ -33,13 +33,19 @@ const LOCALES = {
         financeSettingsTitle: 'Финансовые настройки',
         resetAll: 'Сбросить всё',
         exportData: 'Экспорт',
+        home: 'Главная',
         shop: 'Магазин',
         mines: 'Мои герои',
+        stats: 'Статистика',
         shopTitle: 'Магазин героев',
         shopSubtitle: 'Купите героев для дохода',
         profile: 'Профиль',
         tasks: 'Задания',
         menu: 'Меню',
+        myHeroesTitle: 'Мои герои',
+        myHeroesSubtitle: 'Купленные герои и статистика',
+        myHeroesCountLabel: 'Куплено героев',
+        myHeroesIncomeLabel: 'Прогноз дохода',
         comingSoon: 'Раздел пока в разработке.',
         balanceReset: 'Баланс обнулён.',
         ratingReset: 'Рейтинг обнулён.',
@@ -53,6 +59,7 @@ const LOCALES = {
         grantLocalAdmin: 'Выдать админку (локально)',
         grantLocalAdminConfirm: 'Выдать себе права администратора локально?',
         depositPrompt: 'Новая заявка на пополнение',
+        withdrawPrompt: 'Новая заявка на вывод',
         notEnough: 'Недостаточно средств',
         addedBalance: 'Баланс добавлен',
         subtractedBalance: 'Баланс уменьшен',
@@ -339,8 +346,10 @@ const LOCALES = {
         financeSettingsTitle: 'Фінансові налаштування',
         resetAll: 'Скинути все',
         exportData: 'Експорт',
+        home: 'Головна',
         shop: 'Магазин',
         mines: 'Мої герої',
+        stats: 'Статистика',
         shopTitle: 'Магазин героїв',
         shopSubtitle: 'Купіть героїв для доходу',
         profile: 'Профіль',
@@ -643,13 +652,86 @@ const APP_STATE = {
     selectedSupportTicketId: '',
     notificationsOnlyUnread: false,
     heroShopFilter: 'all',
+    shopDecisionType: '',
     selectedShopHeroId: '',
+    shopFocusHeroId: '',
     selectedHeroInstanceId: '',
     adminTab: 'overview',
-    activeNavIndex: 2 // profile is default (index 2)
+    activeNavIndex: 2, // home is default (index 2)
+    lastEconomyRenderAt: 0,
+    modelPlaybackQueued: false
 };
 
-const NAV_ORDER = ['shop', 'mines', 'profile', 'stats', 'menu'];
+const NAV_ORDER = ['shop', 'mines', 'home', 'stats', 'menu'];
+const ROUTE_NAV_PARENT = {
+    shop: 'shop',
+    mines: 'mines',
+    home: 'home',
+    stats: 'stats',
+    menu: 'menu',
+    profile: null,
+    tasks: null,
+    referral: 'menu',
+    rating: 'menu',
+    history: 'menu',
+    audit: 'menu'
+};
+
+function isPerfReducedMode() {
+    const root = document.documentElement;
+    if (!root) return false;
+    if (root.classList.contains('android-fx') || root.classList.contains('low-fx')) return true;
+    try {
+        return Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (_) {
+        return false;
+    }
+}
+
+function getActiveRoute() {
+    return document.body?.dataset?.route || NAV_ORDER[APP_STATE.activeNavIndex] || 'home';
+}
+
+function isElementVisibleForWork(element) {
+    if (!element || element.hidden || element.closest('.hidden')) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+}
+
+function queueModelViewerPlaybackSync() {
+    if (APP_STATE.modelPlaybackQueued) return;
+    APP_STATE.modelPlaybackQueued = true;
+    const run = () => {
+        APP_STATE.modelPlaybackQueued = false;
+        syncModelViewerPlayback();
+    };
+    if ('requestIdleCallback' in window) {
+        window.requestIdleCallback(run, { timeout: 180 });
+    } else {
+        setTimeout(run, 80);
+    }
+}
+
+function syncModelViewerPlayback() {
+    const reduced = isPerfReducedMode();
+    const hidden = document.visibilityState !== 'visible';
+    document.querySelectorAll('model-viewer').forEach((viewer) => {
+        const visible = !hidden && isElementVisibleForWork(viewer);
+        if (!viewer.dataset.baseRotationSpeed) {
+            viewer.dataset.baseRotationSpeed = viewer.getAttribute('rotation-per-second') || '5deg';
+        }
+        if (!visible) {
+            try { viewer.autoRotate = false; } catch (_) {}
+            viewer.removeAttribute('auto-rotate');
+            viewer.setAttribute('reveal', 'interaction');
+            return;
+        }
+        try { viewer.autoRotate = true; } catch (_) {}
+        viewer.setAttribute('auto-rotate', '');
+        viewer.setAttribute('reveal', 'auto');
+        viewer.setAttribute('rotation-per-second', reduced ? '3deg' : viewer.dataset.baseRotationSpeed);
+    });
+}
 
 let _splashDismissScheduled = false;
 
@@ -673,6 +755,7 @@ function scheduleSplashDismiss(delayMs = 1600) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    document.body.classList.add('is-home');
     scheduleSplashDismiss();
     createBackgroundScene();
     initializeTelegramWebApp();
@@ -715,6 +798,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else {
             window.gameDB.setUserOffline(uid);
         }
+        queueModelViewerPlaybackSync();
     });
     window.addEventListener('beforeunload', () => {
         if (window.gameDB) window.gameDB.setUserOffline(window.gameDB.getUser().id);
@@ -783,7 +867,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderApp();
     });
     window.setInterval(() => {
+        if (document.visibilityState !== 'visible') return;
         if (processHeroEconomy()) {
+            const now = Date.now();
+            if (isPerfReducedMode() && now - APP_STATE.lastEconomyRenderAt < 5000) {
+                renderHeroTimersOnly();
+                return;
+            }
+            APP_STATE.lastEconomyRenderAt = now;
             renderApp();
             return;
         }
@@ -975,7 +1066,7 @@ function initializeTelegramWebApp() {
 }
 
 async function normalizeUserData() {
-    const user = window.gameDB.getUser();
+    const user = window.gameDB.getUser() || {};
     const isAdmin = Boolean(user.id) && window.gameDB.isAdmin(String(user.id));
     window.gameDB.updateUser({
         id: user.id,
@@ -1084,8 +1175,7 @@ function initializeInteractions() {
             window.__navLock = true;
             setTimeout(function () { window.__navLock = false; }, 240);
             triggerHaptic('light');
-            handleNavigation(button.dataset.nav);
-            setActiveNavButton(button.dataset.nav);
+            navigateTo(button.dataset.nav);
         });
     });
 
@@ -1160,6 +1250,7 @@ function initializeInteractions() {
         if (event.key === 'Escape') {
             closeAdminModal();
             closeFormModal();
+            closeDepositModal();
             closeUserDetailModal();
             closeHeroDetailModal();
             closeNotificationsModal();
@@ -1213,6 +1304,8 @@ function initializeInteractions() {
     }
 
     if (notificationsFab) notificationsFab.addEventListener('click', openNotificationsModal);
+    const homeNotifyButton = document.getElementById('home-notify-btn');
+    if (homeNotifyButton) homeNotifyButton.addEventListener('click', openNotificationsModal);
     if (supportFab) supportFab.addEventListener('click', openSupportModal);
     if (notificationsModalClose) notificationsModalClose.addEventListener('click', closeNotificationsModal);
     if (supportModalClose) supportModalClose.addEventListener('click', () => {
@@ -1384,6 +1477,161 @@ function initializeInteractions() {
     }
 
     initRippleButtons();
+    initHeroCardTilt();
+}
+
+/**
+ * 3D pointer-tilt effect for the profile hero card.
+ * Skips low-end devices, touch-only screens and reduced-motion users.
+ */
+function initHeroCardTilt() {
+    const card = document.querySelector('.prf-hero-card');
+    if (!card) return;
+    if (card.dataset.tiltBound === '1') return;
+
+    const html = document.documentElement;
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const isTouchOnly = ('ontouchstart' in window) && !window.matchMedia('(hover: hover)').matches;
+    if (reduceMotion || html.classList.contains('low-fx') || isTouchOnly) return;
+
+    const MAX_DEG = 6;
+    let raf = 0;
+    let pendingX = 0;
+    let pendingY = 0;
+    let pendingGx = 50;
+    let pendingGy = 50;
+
+    function apply() {
+        raf = 0;
+        card.style.setProperty('--tilt-x', pendingX.toFixed(2) + 'deg');
+        card.style.setProperty('--tilt-y', pendingY.toFixed(2) + 'deg');
+        card.style.setProperty('--gx', pendingGx.toFixed(1) + '%');
+        card.style.setProperty('--gy', pendingGy.toFixed(1) + '%');
+    }
+
+    card.addEventListener('pointermove', (event) => {
+        if (event.pointerType === 'touch') return;
+        const rect = card.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const px = (event.clientX - rect.left) / rect.width;
+        const py = (event.clientY - rect.top) / rect.height;
+        pendingY = (px - 0.5) * 2 * MAX_DEG;
+        pendingX = (0.5 - py) * 2 * MAX_DEG;
+        pendingGx = px * 100;
+        pendingGy = py * 100;
+        if (!card.classList.contains('is-tilting')) card.classList.add('is-tilting');
+        if (!raf) raf = requestAnimationFrame(apply);
+    });
+
+    function reset() {
+        if (raf) { cancelAnimationFrame(raf); raf = 0; }
+        card.classList.remove('is-tilting');
+        card.style.setProperty('--tilt-x', '0deg');
+        card.style.setProperty('--tilt-y', '0deg');
+    }
+    card.addEventListener('pointerleave', reset);
+    card.addEventListener('pointercancel', reset);
+    card.addEventListener('blur', reset, true);
+
+    card.dataset.tiltBound = '1';
+}
+
+/**
+ * Daily streak indicator — 7 dots showing consecutive daily visits.
+ * Persists in localStorage per user id; rolls over at local midnight.
+ */
+const STREAK_STORAGE_KEY = 'rnxDailyStreak';
+function _streakDayKey(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function _streakDaysBetween(aKey, bKey) {
+    const a = new Date(aKey + 'T00:00:00');
+    const b = new Date(bKey + 'T00:00:00');
+    return Math.round((b - a) / 86400000);
+}
+function getDailyStreakState() {
+    const userId = (window.gameDB && window.gameDB.getUser && window.gameDB.getUser().id) || 'guest';
+    let raw;
+    try { raw = JSON.parse(localStorage.getItem(STREAK_STORAGE_KEY) || '{}'); } catch (_) { raw = {}; }
+    const todayKey = _streakDayKey(new Date());
+    const entry = raw[userId] || { lastDay: null, count: 0, claimedRewardOn: null };
+
+    if (entry.lastDay !== todayKey) {
+        const diff = entry.lastDay ? _streakDaysBetween(entry.lastDay, todayKey) : null;
+        if (diff === 1) entry.count = (entry.count || 0) + 1;
+        else if (diff === 0) { /* same day, ignore */ }
+        else entry.count = 1; // gap or first visit → reset to 1
+        entry.lastDay = todayKey;
+        raw[userId] = entry;
+        try { localStorage.setItem(STREAK_STORAGE_KEY, JSON.stringify(raw)); } catch (_) {}
+    }
+    return entry;
+}
+function renderDailyStreak() {
+    const strip = document.querySelector('.prf-hero-card .prf-activity-strip');
+    if (!strip) return;
+
+    let block = document.getElementById('prf-daily-streak');
+    if (!block) {
+        block = document.createElement('div');
+        block.id = 'prf-daily-streak';
+        block.className = 'prf-daily-streak';
+        block.innerHTML = `
+            <div class="prf-streak-header">
+                <span class="prf-streak-icon" aria-hidden="true">🔥</span>
+                <span class="prf-streak-title" id="prf-streak-title">Серия входов</span>
+                <span class="prf-streak-count" id="prf-streak-count">0</span>
+            </div>
+            <div class="prf-streak-dots" id="prf-streak-dots" role="list"></div>
+            <p class="prf-streak-hint" id="prf-streak-hint"></p>
+        `;
+        strip.insertAdjacentElement('afterend', block);
+    }
+
+    const isUa = getCurrentLanguage() === 'ua';
+    const titleEl = block.querySelector('#prf-streak-title');
+    const countEl = block.querySelector('#prf-streak-count');
+    const dotsEl  = block.querySelector('#prf-streak-dots');
+    const hintEl  = block.querySelector('#prf-streak-hint');
+
+    const state = getDailyStreakState();
+    const streak = Math.max(0, state.count || 0);
+    const filled = Math.min(7, streak % 7 || (streak >= 7 ? 7 : streak));
+    const isFullCycle = streak > 0 && streak % 7 === 0;
+
+    if (titleEl) titleEl.textContent = isUa ? 'Серія входів' : 'Серия входов';
+    if (countEl) countEl.textContent = String(streak);
+
+    if (dotsEl) {
+        const labels = isUa ? ['Пн','Вт','Ср','Чт','Пт','Сб','Нд'] : ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+        let html = '';
+        for (let i = 0; i < 7; i++) {
+            const active = i < filled;
+            const isToday = i === filled - 1;
+            html += `
+                <div class="prf-streak-dot${active ? ' is-active' : ''}${isToday ? ' is-today' : ''}${isFullCycle && active ? ' is-celebrate' : ''}" role="listitem">
+                    <span class="prf-streak-dot-mark" aria-hidden="true">${active ? '✓' : ''}</span>
+                    <span class="prf-streak-dot-lbl">${labels[i]}</span>
+                </div>
+            `;
+        }
+        dotsEl.innerHTML = html;
+    }
+
+    if (hintEl) {
+        if (isFullCycle) {
+            hintEl.textContent = isUa
+                ? '🎁 7 днів поспіль — бонус активовано!'
+                : '🎁 7 дней подряд — бонус активирован!';
+            hintEl.classList.add('is-reward');
+        } else {
+            const left = 7 - filled;
+            hintEl.textContent = isUa
+                ? `Ще ${left} ${left === 1 ? 'день' : 'днів'} до бонусу`
+                : `Ещё ${left} ${left === 1 ? 'день' : (left >= 2 && left <= 4 ? 'дня' : 'дней')} до бонуса`;
+            hintEl.classList.remove('is-reward');
+        }
+    }
 }
 
 function renderApp() {
@@ -1392,6 +1640,7 @@ function renderApp() {
     const t = getTranslations(language);
     const user = window.gameDB.getUser();
     const locale = LANGUAGE_TO_LOCALE[language] || 'ru-RU';
+    const activeRoute = getActiveRoute();
 
     document.documentElement.lang = language === 'ua' ? 'uk' : language;
 
@@ -1401,6 +1650,7 @@ function renderApp() {
             element.textContent = t[key];
         }
     });
+    syncBottomNavLanguage(language);
 
     const headerOnlineLabel = document.querySelector('.online-chip .hero-summary-label');
     if (headerOnlineLabel) {
@@ -1424,32 +1674,38 @@ function renderApp() {
     const telegramUserId = String(user.id || window.Telegram?.WebApp?.initDataUnsafe?.user?.id || '');
     const initials = getInitials(name, username);
 
-    setText('balance-value', `${formatNumber(user.balanceBuy, locale)} TON`);
     const _totalUsers = (window.gameDB && typeof window.gameDB.getUsers === 'function') ? window.gameDB.getUsers().length : 0;
     const _ratingLabel = getCurrentLanguage() === 'ua' ? 'гравців' : 'игроков';
     setText('rating-value', `#${formatNumber(user.rating.position, locale)} / ${formatNumber(_totalUsers || 1, locale)} ${_ratingLabel}`);
 
-    // Animated count-up for balances
+    // Animated count-up for numeric fields
     if (typeof countUp === 'function') {
-        countUp(document.getElementById('balance-buy-value'),    Number(user.balanceBuy || 0),      { decimals: 2, suffix: ' TON', duration: 800 });
-        countUp(document.getElementById('balance-withdraw-value'), Number(user.balanceWithdraw || 0), { decimals: 2, suffix: ' TON', duration: 800 });
-        countUp(document.getElementById('rnx-balance-value'),    Number(user.rnxBalance || 0),      { suffix: ' $RNX', duration: 900 });
+        countUp(document.getElementById('balance-value'),         Number(user.balanceBuy || 0),      { decimals: 2, suffix: ' TON', duration: 800, locale });
+        countUp(document.getElementById('balance-buy-value'),     Number(user.balanceBuy || 0),      { decimals: 2, suffix: ' TON', duration: 800, locale });
+        countUp(document.getElementById('balance-withdraw-value'), Number(user.balanceWithdraw || 0), { decimals: 2, suffix: ' TON', duration: 800, locale });
+        countUp(document.getElementById('rnx-balance-value'),     Number(user.rnxBalance || 0),      { suffix: ' $RNX', duration: 900, locale });
+        countUp(document.getElementById('mined-data'),            Number(user.stats.totalRnxEarned || 0), { suffix: ' ' + t.kgShort, duration: 800, locale });
+        countUp(document.getElementById('purchased-data'),        Number(user.stats.purchased || 0), { duration: 600, locale });
+        countUp(document.getElementById('invited-data'),          Number(user.stats.invited || 0),   { duration: 600, locale });
+        countUp(document.getElementById('deposited-data'),        Number(user.stats.deposited || 0), { decimals: 2, suffix: ' TON', duration: 800, locale });
+        countUp(document.getElementById('withdrawn-data'),        Number(user.stats.withdrawn || 0), { decimals: 2, suffix: ' TON', duration: 800, locale });
     } else {
+        setText('balance-value', `${formatNumber(user.balanceBuy, locale)} TON`);
         setText('balance-buy-value', `${Number(user.balanceBuy || 0).toFixed(2)} TON`);
         setText('balance-withdraw-value', `${Number(user.balanceWithdraw || 0).toFixed(2)} TON`);
         setText('rnx-balance-value', `${formatNumber(user.rnxBalance, locale)} $RNX`);
+        setText('mined-data', `${formatNumber(user.stats.totalRnxEarned || 0, locale)} ${t.kgShort}`);
+        setText('level-data', formatNumber(user.stats.level, locale));
+        setText('purchased-data', formatNumber(user.stats.purchased, locale));
+        setText('invited-data', formatNumber(user.stats.invited, locale));
+        setText('deposited-data', `${Number(user.stats.deposited || 0).toFixed(2)} TON`);
+        setText('withdrawn-data', `${Number(user.stats.withdrawn || 0).toFixed(2)} TON`);
     }
     setText('user-name', name);
     setText('hero-header-name', username);
     setText('username-data', username);
     setText('telegram-id', `${t.telegramIdLabel}: ${telegramUserId || '-'}`);
     setText('registration-data', formatRegistrationDate(user.registrationDate, locale));
-    setText('mined-data', `${formatNumber(user.stats.totalRnxEarned || 0, locale)} ${t.kgShort}`);
-    setText('level-data', formatNumber(user.stats.level, locale));
-    setText('purchased-data', formatNumber(user.stats.purchased, locale));
-    setText('invited-data', formatNumber(user.stats.invited, locale));
-    setText('deposited-data', `${Number(user.stats.deposited || 0).toFixed(2)} TON`);
-    setText('withdrawn-data', `${Number(user.stats.withdrawn || 0).toFixed(2)} TON`);
     setText('avatar-initials', initials);
 
     // Show Telegram avatar if available
@@ -1470,7 +1726,7 @@ function renderApp() {
     setText('deposit-btn-text', t.depositButton);
     setText('withdraw-btn-text', t.withdrawButton);
     setText('exchange-btn-text', `${t.exchangeButton} $RNX`);
-    setText('local-admin-btn', t.localAdminButton);
+    setText('local-admin-btn', t.localAdminButton || 'Выдать админку');
     setText('admin-add-balance', t.adminAddBalanceButton);
     setText('admin-subtract-balance', t.adminSubtractBalanceButton);
     setText('admin-grant-hero', t.adminGrantHeroButton);
@@ -1519,7 +1775,11 @@ function renderApp() {
     if (window.gameDB && typeof window.gameDB.getDatabaseStats === 'function') {
         const onlineEl = document.getElementById('online-value');
         const stats = window.gameDB.getDatabaseStats();
-        if (onlineEl) onlineEl.textContent = String(stats.realOnlineCount || 0);
+        const onlineNum = Number(stats.realOnlineCount || 0);
+        if (onlineEl) {
+            if (typeof countUp === 'function') countUp(onlineEl, onlineNum, { duration: 700, locale });
+            else onlineEl.textContent = String(onlineNum);
+        }
     }
 
     // --- Level progress bar ---
@@ -1531,7 +1791,11 @@ function renderApp() {
     const progressPct = Math.min(100, Math.round((totalRnxEarned % rnxPerLevel) / rnxPerLevel * 100));
     setText('level-progress-current', String(level));
     setText('level-progress-current2', String(level));
-    setText('level-data', String(level));
+    if (typeof countUp === 'function') {
+        countUp(document.getElementById('level-data'), level, { duration: 600, locale });
+    } else {
+        setText('level-data', String(level));
+    }
     setText('level-progress-xp', `${currentXP} / 100 XP`);
     const progressFill = document.getElementById('level-progress-fill');
     if (progressFill) {
@@ -1546,6 +1810,19 @@ function renderApp() {
         progressFill.dataset.prevPct = String(progressPct);
         progressFill.style.width = progressPct + '%';
     }
+    // ── Avatar XP ring (circumference = 2π·r, r=46) ──
+    (function() {
+        const ringFill = document.querySelector('.prf-avatar-wrap .prf-ring-fill');
+        const wrap = document.querySelector('.prf-avatar-wrap');
+        if (!ringFill || !wrap) return;
+        const C = 2 * Math.PI * 46;
+        const offset = C * (1 - Math.max(0, Math.min(100, progressPct)) / 100);
+        ringFill.style.setProperty('stroke-dasharray', `${C.toFixed(2)} ${C.toFixed(2)}`, 'important');
+        ringFill.style.setProperty('stroke-dashoffset', offset.toFixed(2), 'important');
+        ringFill.style.setProperty('transition', 'stroke-dashoffset 900ms cubic-bezier(0.22, 1, 0.36, 1)', 'important');
+        wrap.classList.add('has-xp-progress');
+        wrap.classList.toggle('xp-near-full', progressPct >= 90);
+    })();
     // Remaining XP text
     const remainingRnxToLevel = rnxPerLevel - (totalRnxEarned % rnxPerLevel);
     const remainingXPDisplay = Math.round(remainingRnxToLevel / 10);
@@ -1560,7 +1837,11 @@ function renderApp() {
     const onlineCount = Math.max(1, _dbStats.realOnlineCount || 0);
     setText('profile-online-count', String(onlineCount));
     const ownedHeroes = user.heroes || [];
-    setText('profile-active-heroes', String(ownedHeroes.length));
+    if (typeof countUp === 'function') {
+        countUp(document.getElementById('profile-active-heroes'), ownedHeroes.length, { duration: 600, locale });
+    } else {
+        setText('profile-active-heroes', String(ownedHeroes.length));
+    }
     // Highlight live-mining button + update label
     const _liveMiningBtn = document.getElementById('prf-live-mining-btn');
     const _liveMiningTxt = document.getElementById('prf-live-btn-text');
@@ -1601,6 +1882,14 @@ function renderApp() {
         if (_nameEl) _nameEl.textContent = _rankName;
     })();
 
+    if (activeRoute === 'profile') {
+        renderDailyStreak();
+        renderProfileBalanceFlow();
+        renderProfileActivityHeatmap();
+        renderProfileCompactDashboard();
+    }
+    if (activeRoute === 'home' && typeof renderHome === 'function') renderHome();
+
     // --- V3: Days in project ---
     (function() {
         const _isUa = getCurrentLanguage() === 'ua';
@@ -1610,7 +1899,10 @@ function renderApp() {
         const _days = Math.max(1, Math.floor(_diffMs / (1000 * 60 * 60 * 24)));
         const _daysEl = document.getElementById('prf-days-in-project');
         const _daysLblEl = document.getElementById('prf-days-label');
-        if (_daysEl) _daysEl.textContent = String(_days);
+        if (_daysEl) {
+            if (typeof countUp === 'function') countUp(_daysEl, _days, { duration: 700, locale });
+            else _daysEl.textContent = String(_days);
+        }
         if (_daysLblEl) {
             const _d = _days % 10;
             const _d100 = _days % 100;
@@ -1708,22 +2000,23 @@ function renderApp() {
         }
     }
 
-    renderUserRequests();
-    renderTasks();
-    renderHistorySection();
-    renderAuditSection();
-    renderMenuDashboard();
+    if (activeRoute === 'profile') renderUserRequests();
+    if (activeRoute === 'tasks') renderTasks();
+    if (activeRoute === 'history') renderHistorySection();
+    if (activeRoute === 'audit') renderAuditSection();
+    if (activeRoute === 'menu') renderMenuDashboard();
     renderNotificationsCenter();
     renderSupportCenter();
     renderHeroDetailModal();
-    renderReferralSection();
-    renderRatingSection();
-    renderShop();
-    renderMyHeroes();
+    if (activeRoute === 'referral') renderReferralSection();
+    if (activeRoute === 'rating') renderRatingSection();
+    if (activeRoute === 'shop') renderShop();
+    if (activeRoute === 'mines') renderMyHeroes();
 
     populateAdminModal();
     renderAdminTabState();
     renderUserDetailModal();
+    queueModelViewerPlaybackSync();
 }
 
 function getActorId() {
@@ -1809,6 +2102,32 @@ function _notifDateGroup(isoStr, ua) {
     return d.toLocaleDateString(locale, { day: 'numeric', month: 'long' });
 }
 
+function _getNotificationGroup(item, ua) {
+    const haystack = `${item?.type || ''} ${item?.title || ''} ${item?.message || ''} ${item?.telegramTemplate || ''} ${item?.meta?.category || ''}`.toLowerCase();
+    if (/deposit|withdraw|finance|request|пополн|вывод|вивед|заявк|ton|баланс/.test(haystack)) {
+        return { id: 'finance', label: ua ? 'Фінанси' : 'Финансы', priority: 1 };
+    }
+    if (/support|ticket|поддерж|підтрим|ответ|відпов/.test(haystack) || item?.ticketId || item?.type === 'support') {
+        return { id: 'support', label: ua ? 'Підтримка' : 'Поддержка', priority: 2 };
+    }
+    if (/hero-income|income|доход|дохід|прибыль|прибут|rnx|геро/.test(haystack)) {
+        return { id: 'income', label: ua ? 'Дохід' : 'Доход', priority: 3 };
+    }
+    return { id: 'system', label: ua ? 'Система' : 'Система', priority: 4 };
+}
+
+function _sortNotificationsByPriority(items, actorId, ua) {
+    return items.slice().sort((left, right) => {
+        const leftGroup = _getNotificationGroup(left, ua);
+        const rightGroup = _getNotificationGroup(right, ua);
+        if (leftGroup.priority !== rightGroup.priority) return leftGroup.priority - rightGroup.priority;
+        const leftUnread = !(Array.isArray(left.readBy) ? left.readBy : []).includes(actorId);
+        const rightUnread = !(Array.isArray(right.readBy) ? right.readBy : []).includes(actorId);
+        if (leftUnread !== rightUnread) return leftUnread ? -1 : 1;
+        return new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime();
+    });
+}
+
 function renderNotificationsCenter() {
     const container = document.getElementById('notifications-list');
     const badge     = document.getElementById('notifications-badge');
@@ -1828,6 +2147,7 @@ function renderNotificationsCenter() {
         badge.textContent = String(unreadCount);
         badge.classList.toggle('hidden', unreadCount === 0);
     }
+    syncHomeNotificationsBadge(unreadCount);
     if (unreadPill) {
         unreadPill.textContent = String(unreadCount);
         unreadPill.classList.toggle('hidden', unreadCount === 0);
@@ -1866,17 +2186,35 @@ function renderNotificationsCenter() {
     }
     if (emptyState) emptyState.classList.add('hidden');
 
-    // Group by date
-    let lastGroup = null;
-    items.slice(0, 30).forEach((item, animIdx) => {
-        const isRead = (Array.isArray(item.readBy) ? item.readBy : []).includes(actorId);
-        const group = _notifDateGroup(item.createdAt, ua);
+    const importantCounts = items.reduce((accumulator, item) => {
+        const group = _getNotificationGroup(item, ua);
+        accumulator[group.id] = (accumulator[group.id] || 0) + 1;
+        return accumulator;
+    }, {});
+    const summary = document.createElement('div');
+    summary.className = 'notif-summary-strip';
+    [
+        { id: 'finance', label: ua ? 'Фінанси' : 'Финансы' },
+        { id: 'support', label: ua ? 'Підтримка' : 'Поддержка' },
+        { id: 'income', label: ua ? 'Дохід' : 'Доход' }
+    ].forEach((group) => {
+        const chip = document.createElement('span');
+        chip.className = `notif-summary-chip notif-summary-${group.id}`;
+        chip.innerHTML = `<strong>${formatNumber(importantCounts[group.id] || 0, ua ? 'uk-UA' : 'ru-RU')}</strong><span>${group.label}</span>`;
+        summary.appendChild(chip);
+    });
+    container.appendChild(summary);
 
-        if (group && group !== lastGroup) {
-            lastGroup = group;
+    let lastGroupId = null;
+    _sortNotificationsByPriority(items, actorId, ua).slice(0, 40).forEach((item, animIdx) => {
+        const isRead = (Array.isArray(item.readBy) ? item.readBy : []).includes(actorId);
+        const group = _getNotificationGroup(item, ua);
+
+        if (group.id !== lastGroupId) {
+            lastGroupId = group.id;
             const div = document.createElement('div');
-            div.className = 'notif-date-divider';
-            div.textContent = group;
+            div.className = `notif-group-divider notif-group-${group.id}`;
+            div.innerHTML = `<span>${group.label}</span><strong>${formatNumber(importantCounts[group.id] || 0, ua ? 'uk-UA' : 'ru-RU')}</strong>`;
             container.appendChild(div);
         }
 
@@ -1895,8 +2233,8 @@ function renderNotificationsCenter() {
         card.innerHTML =
             '<div class="notif-card-icon ' + iconClass + '">' + iconSvg + '</div>' +
             '<div class="notif-card-body">' +
-                '<div class="notif-card-title">' + (item.title || t.notificationsTitle) + '</div>' +
-                (item.message ? '<div class="notif-card-msg">' + item.message + '</div>' : '') +
+                '<div class="notif-card-title">' + escapeHTML(item.title || t.notificationsTitle) + '</div>' +
+                (item.message ? '<div class="notif-card-msg">' + escapeHTML(item.message) + '</div>' : '') +
                 '<div class="notif-card-foot">' +
                     '<span class="notif-card-time">' +
                         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' +
@@ -1913,6 +2251,20 @@ function renderNotificationsCenter() {
         });
         container.appendChild(card);
     });
+}
+
+function syncHomeNotificationsBadge(unreadCount = 0) {
+    const dot = document.getElementById('home-notify-dot');
+    const button = document.getElementById('home-notify-btn');
+    const count = Math.max(0, Number(unreadCount || 0));
+    if (dot) {
+        dot.textContent = count > 9 ? '!' : String(count);
+        dot.classList.toggle('hidden', count === 0);
+    }
+    if (button) {
+        button.classList.toggle('has-unread', count > 0);
+        button.setAttribute('aria-label', count > 0 ? `${getTranslations().menuNotifications || 'Уведомления'}: ${count}` : (getTranslations().menuNotifications || 'Уведомления'));
+    }
 }
 
 function getSupportStatusLabel(status, t = getTranslations()) {
@@ -2288,6 +2640,8 @@ function getHeroTextSet() {
         levelRange: isUa ? 'Рівень' : 'Уровень',
         nextPayout: isUa ? 'Найближче завершення' : 'Ближайшее завершение',
         readyForClaim: isUa ? 'Готово до завершення' : 'Готово к завершению',
+        collectIncome: isUa ? 'Зібрати дохід' : 'Собрать доход',
+        incomePending: isUa ? 'Дохід через' : 'Доход через',
         miningProgress: isUa ? 'Відпрацювання терміну' : 'Отработка срока',
         lifetimeShort: isUa ? 'За весь час' : 'За все время',
         localAdminGranted: isUa ? 'Адмінку видано локально' : 'Админка выдана локально',
@@ -2461,7 +2815,12 @@ function syncHeaderDensity(type) {
         profile: getCurrentLanguage() === 'ua' ? 'Профіль гравця' : 'Профиль игрока',
         shop:    getCurrentLanguage() === 'ua' ? 'Магазин героїв' : 'Магазин героев',
         mines:   getCurrentLanguage() === 'ua' ? 'Мої герої'      : 'Мои герои',
+        tasks:   getCurrentLanguage() === 'ua' ? 'Завдання'       : 'Задания',
         stats:   getCurrentLanguage() === 'ua' ? 'Статистика'     : 'Статистика',
+        referral:getCurrentLanguage() === 'ua' ? 'Реферали'       : 'Рефералы',
+        rating:  getCurrentLanguage() === 'ua' ? 'Рейтинг'        : 'Рейтинг',
+        history: getCurrentLanguage() === 'ua' ? 'Історія'        : 'История',
+        audit:   getCurrentLanguage() === 'ua' ? 'Аудит'          : 'Аудит',
         menu:    getCurrentLanguage() === 'ua' ? 'Центр керування' : 'Центр управления',
     };
     const _labelEl = document.querySelector('.hero-head-main .section-label');
@@ -2623,19 +2982,92 @@ function renderHeroTimersOnly() {
     }
 }
 
+function renderHomeDailyPlan({ activeHero, activeHeroName, activeEconomyHero, hasOwnedHeroes, heroesCount, tasksCount, isUa, locale }) {
+    const mission = document.querySelector('.home-mission');
+    if (!mission) return;
+
+    const kicker = document.getElementById('home-mission-kicker');
+    const title = document.getElementById('home-mission-title');
+    const heroStatus = document.getElementById('home-mission-hero-status');
+    const taskStatus = document.getElementById('home-mission-task-status');
+    const streakStatus = document.getElementById('home-mission-streak-status');
+    const steps = mission.querySelectorAll('.home-mission-step');
+    const heroStep = steps[0];
+    const taskStep = steps[1];
+    const streakStep = steps[2];
+    const heroText = getHeroTextSet();
+    const streakCount = (() => {
+        try { return Math.max(0, Number(getDailyStreakState?.().count || 0)); } catch (_) { return 0; }
+    })();
+    const safeTasksCount = Math.max(0, Number(tasksCount || 0));
+    const safeHeroesCount = Math.max(0, Number(heroesCount || 0));
+    const cycleReady = activeEconomyHero && activeEconomyHero.countdown === heroText.cycleReady;
+    const cyclePercent = activeEconomyHero ? Math.round(Math.max(0, Math.min(1, Number(activeEconomyHero.cycleProgress || 0))) * 100) : 0;
+
+    mission.hidden = false;
+    mission.dataset.state = activeHero ? (cycleReady ? 'ready' : 'mining') : (hasOwnedHeroes ? 'select' : 'empty');
+    // V45: expose cycle progress for CSS-driven progress bar
+    mission.dataset.cyclePercent = String(cyclePercent);
+    try { mission.style.setProperty('--mission-progress', `${cycleReady ? 100 : cyclePercent}%`); } catch (_) {}
+
+    if (kicker) kicker.textContent = isUa ? 'ПЛАН ДНЯ' : 'ПЛАН ДНЯ';
+    if (taskStatus) taskStatus.textContent = isUa ? `Квести ${formatNumber(safeTasksCount, locale)}` : `Квесты ${formatNumber(safeTasksCount, locale)}`;
+    if (streakStatus) streakStatus.textContent = isUa ? `Серія ${formatNumber(streakCount, locale)}` : `Серия ${formatNumber(streakCount, locale)}`;
+
+    if (activeHero) {
+        const countdown = activeEconomyHero?.countdown || '00:00:00';
+        if (title) title.textContent = cycleReady
+            ? (isUa ? `${activeHeroName}: прибуток готовий` : `${activeHeroName}: доход готов`)
+            : (isUa ? `${activeHeroName}: цикл ${formatNumber(cyclePercent, locale)}%` : `${activeHeroName}: цикл ${formatNumber(cyclePercent, locale)}%`);
+        if (heroStatus) heroStatus.textContent = cycleReady
+            ? (isUa ? 'Готово до збору' : 'Готов к сбору')
+            : (isUa ? `Майнить ${countdown}` : `Майнит ${countdown}`);
+        if (heroStep) heroStep.dataset.homeAction = 'mines';
+    } else if (hasOwnedHeroes) {
+        if (title) title.textContent = isUa ? 'Поставте героя на головний екран' : 'Поставьте героя на главный экран';
+        if (heroStatus) heroStatus.textContent = isUa ? `Герої ${formatNumber(safeHeroesCount, locale)}` : `Герои ${formatNumber(safeHeroesCount, locale)}`;
+        if (heroStep) heroStep.dataset.homeAction = 'mines';
+    } else {
+        if (title) title.textContent = isUa ? 'Отримайте першого героя' : 'Получите первого героя';
+        if (heroStatus) heroStatus.textContent = isUa ? 'Герой 0/1' : 'Герой 0/1';
+        if (heroStep) heroStep.dataset.homeAction = 'shop';
+    }
+
+    if (heroStep) {
+        heroStep.classList.toggle('is-primary', true);
+        heroStep.classList.toggle('is-live', Boolean(activeHero && !cycleReady));
+        heroStep.classList.toggle('is-ready', Boolean(activeHero && cycleReady));
+        heroStep.classList.toggle('is-empty', !activeHero);
+    }
+    if (taskStep) {
+        taskStep.classList.toggle('is-done', safeTasksCount > 0);
+        taskStep.dataset.homeAction = 'tasks';
+    }
+    if (streakStep) {
+        streakStep.classList.toggle('is-done', streakCount > 0);
+        streakStep.dataset.homeAction = 'streak';
+    }
+}
+
 function renderMenuDashboard() {
     const container = document.getElementById('menu-dashboard');
     if (!container || !window.gameDB) return;
     if (document.getElementById('menu-section')?.classList.contains('hidden')) return;
+    const isUa = getCurrentLanguage() === 'ua';
     const heroText = getHeroTextSet();
     const locale = LANGUAGE_TO_LOCALE[getCurrentLanguage()] || 'ru-RU';
     const user = window.gameDB.getUser();
     const heroes = Array.isArray(user.heroes) ? user.heroes : [];
+    const enrichedHeroes = heroes.map((hero) => enrichHeroWithEconomy(hero, heroes));
     const synergy = getHeroSynergySummary(heroes);
     const unread = window.gameDB.getNotificationsForUser(getActorId(), Boolean(user.isAdmin)).filter((item) => !(item.readBy || []).includes(getActorId())).length;
     const pendingTickets = window.gameDB.getSupportTickets().filter((item) => Boolean(user.isAdmin) || String(item.userId) === getActorId()).filter((item) => item.status !== 'closed').length;
+    const pendingFinance = window.gameDB.getRequests().filter((item) => String(item.userId || '') === String(user.id || getActorId()) && item.status === 'pending').length;
     const heroOps = window.gameDB.getHeroOperations().filter((item) => String(item.userId) === String(user.id || '') || (!user.id && !item.userId)).length;
     const heroCount = heroes.length;
+    const readyIncome = enrichedHeroes.filter((hero) => hero.countdown === heroText.cycleReady).length;
+    const dailyIncome = Math.round(enrichedHeroes.reduce((sum, hero) => sum + (Number(hero.boostedProfitPerHour || 0) * 24), 0));
+    const totalTon = Number(user.balanceBuy || 0) + Number(user.balanceWithdraw || 0);
 
     const menuT = getTranslations();
     const menuIcons = {
@@ -2650,16 +3082,16 @@ function renderMenuDashboard() {
         updates: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`
     };
     const cards = [
-        { icon: menuIcons.notifications, title: heroText.menuNotifications, value: unread, accent: 'cyan', badge: unread > 0, action: () => openNotificationsModal() },
-        { icon: menuIcons.support, title: heroText.menuSupport, value: pendingTickets, accent: 'amber', badge: pendingTickets > 0, action: () => openSupportModal() },
-        { icon: menuIcons.heroes, title: heroText.menuHeroLedger, value: heroOps, accent: 'purple', action: () => { handleNavigation('history'); setActiveNavButton('menu'); } },
-        { icon: menuIcons.synergy, title: heroText.synergy, value: `${Math.round(synergy.totalBonus * 100)}%`, accent: 'green', action: () => { handleNavigation('mines'); setActiveNavButton('mines'); } },
-        { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`, title: 'Статистика', value: '→', accent: 'cyan', action: () => { handleNavigation('stats'); setActiveNavButton('stats'); } },
-        { icon: menuIcons.referral, title: menuT.referralTitle, value: user.stats?.referrals || 0, accent: 'cyan', action: () => { handleNavigation('referral'); setActiveNavButton('menu'); } },
-        { icon: menuIcons.rating, title: menuT.ratingTitle || heroText.menuHistory, value: `#${user.rating?.position || 0}`, accent: 'purple', action: () => { handleNavigation('rating'); setActiveNavButton('menu'); } },
-        { icon: menuIcons.promo, title: menuT.promoTitle, value: '→', accent: 'amber', action: () => openPromoCodeModal() },
-        { icon: menuIcons.history, title: menuT.historyTitle || heroText.menuHistory, value: '→', accent: 'green', action: () => { handleNavigation('history'); setActiveNavButton('menu'); } },
-        { icon: menuIcons.updates, title: heroText.menuUpdates, value: '→', accent: 'cyan', action: () => openUpdatesModal() }
+        { group: 'now', icon: menuIcons.notifications, title: heroText.menuNotifications, value: unread, accent: 'cyan', badge: unread > 0, action: () => openNotificationsModal() },
+        { group: 'now', icon: menuIcons.support, title: heroText.menuSupport, value: pendingTickets, accent: 'amber', badge: pendingTickets > 0, action: () => openSupportModal() },
+        { group: 'game', icon: menuIcons.heroes, title: isUa ? 'Історія героїв' : 'История героев', value: heroOps, accent: 'purple', action: () => navigateTo('history') },
+        { group: 'game', icon: menuIcons.synergy, title: heroText.synergy, value: `${Math.round(synergy.totalBonus * 100)}%`, accent: 'green', action: () => navigateTo('mines') },
+        { group: 'game', icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`, title: isUa ? 'Статистика' : 'Статистика', value: '→', accent: 'cyan', action: () => navigateTo('stats') },
+        { group: 'community', icon: menuIcons.referral, title: menuT.referralTitle, value: user.stats?.referrals || 0, accent: 'cyan', action: () => navigateTo('referral') },
+        { group: 'community', icon: menuIcons.rating, title: menuT.ratingTitle || heroText.menuHistory, value: `#${user.rating?.position || 0}`, accent: 'purple', action: () => navigateTo('rating') },
+        { group: 'community', icon: menuIcons.promo, title: menuT.promoTitle, value: '→', accent: 'amber', action: () => openPromoCodeModal() },
+        { group: 'system', icon: menuIcons.history, title: menuT.historyTitle || heroText.menuHistory, value: '→', accent: 'green', action: () => navigateTo('history') },
+        { group: 'system', icon: menuIcons.updates, title: heroText.menuUpdates, value: '→', accent: 'cyan', action: () => openUpdatesModal() }
     ];
 
     const menuSummary = [
@@ -2669,17 +3101,34 @@ function renderMenuDashboard() {
     ];
 
     const heroMetrics = [
-        { label: 'Баланс', value: `${Number(user.balance || 0).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TON` },
-        { label: 'Героїв активних', value: formatNumber(heroCount, locale) },
-        { label: 'Тікетів', value: formatNumber(pendingTickets, locale) },
-        { label: 'Сповіщень', value: formatNumber(unread, locale) }
+        { label: isUa ? 'Баланс' : 'Баланс', value: `${totalTon.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TON` },
+        { label: isUa ? 'Героїв' : 'Героев', value: formatNumber(heroCount, locale) },
+        { label: isUa ? 'Дохід / день' : 'Доход / день', value: `${formatNumber(dailyIncome, locale)} RNX` },
+        { label: isUa ? 'Нових' : 'Новых', value: formatNumber(unread, locale) }
     ];
 
     const heroFloaters = [
-        { icon: '◆', label: 'Синергія', value: `${Math.round(synergy.totalBonus * 100)}%` },
-        { icon: '◔', label: 'Рейтинг', value: `#${user.rating?.position || 0}` },
-        { icon: '✦', label: 'Реферали', value: formatNumber(user.stats?.referrals || 0, locale) }
+        { icon: '◆', label: isUa ? 'Синергія' : 'Синергия', value: `${Math.round(synergy.totalBonus * 100)}%` },
+        { icon: '◔', label: isUa ? 'Рейтинг' : 'Рейтинг', value: `#${user.rating?.position || 0}` },
+        { icon: '✦', label: isUa ? 'Реферали' : 'Рефералы', value: formatNumber(user.stats?.referrals || 0, locale) }
     ];
+
+    const priorityActions = [
+        { key: 'income', label: isUa ? 'Дохід' : 'Доход', value: readyIncome > 0 ? `${readyIncome} ${isUa ? 'готово' : 'готово'}` : `${formatNumber(dailyIncome, locale)} RNX`, tone: readyIncome > 0 ? 'hot' : 'green', action: () => navigateTo('mines') },
+        { key: 'finance', label: isUa ? 'Фінанси' : 'Финансы', value: pendingFinance > 0 ? `${pendingFinance} ${isUa ? 'очікує' : 'ждёт'}` : `${totalTon.toLocaleString(locale, { maximumFractionDigits: 2 })} TON`, tone: pendingFinance > 0 ? 'hot' : 'cyan', action: () => {
+            navigateTo('profile');
+            setTimeout(() => document.querySelector('.prf-finance-block')?.scrollIntoView({ behavior: isPerfReducedMode() ? 'auto' : 'smooth', block: 'start' }), 180);
+        } },
+        { key: 'support', label: isUa ? 'Підтримка' : 'Поддержка', value: pendingTickets > 0 ? String(pendingTickets) : (isUa ? 'онлайн' : 'онлайн'), tone: pendingTickets > 0 ? 'amber' : 'muted', action: () => openSupportModal() },
+        { key: 'alerts', label: isUa ? 'Сповіщення' : 'Уведомления', value: unread > 0 ? String(unread) : (isUa ? 'чисто' : 'чисто'), tone: unread > 0 ? 'hot' : 'muted', action: () => openNotificationsModal() }
+    ];
+
+    const groupLabels = {
+        now: isUa ? 'Зараз важливо' : 'Сейчас важно',
+        game: isUa ? 'Гра та прогрес' : 'Игра и прогресс',
+        community: isUa ? 'Спільнота' : 'Сообщество',
+        system: isUa ? 'Система' : 'Система'
+    };
 
     container.innerHTML = `
         <section class="menu-cinematic-hero">
@@ -2691,13 +3140,13 @@ function renderMenuDashboard() {
                         <span class="menu-dashboard-pill">${heroText.menuHubLabel}</span>
                     </div>
                     <h3 class="menu-dashboard-title menu-cinematic-title">${heroText.actionHubSubtitle}</h3>
-                    <p class="menu-cinematic-subtitle">Керуйте героями, відстежуйте активність та тримайте всі ключові дії в одному центрі керування.</p>
+                    <p class="menu-cinematic-subtitle">${isUa ? 'Керуйте героями, відстежуйте активність та тримайте всі ключові дії в одному центрі керування.' : 'Управляйте героями, отслеживайте активность и держите все ключевые действия в одном центре.'}</p>
                     <div class="menu-dashboard-mini menu-cinematic-metrics">
                         ${heroMetrics.map((item) => `<div class="menu-dashboard-mini-chip menu-cinematic-chip"><span>${item.label}</span><strong>${item.value}</strong></div>`).join('')}
                     </div>
                     <div class="menu-cinematic-actions">
-                        <button class="menu-cinematic-cta menu-cinematic-cta-primary" id="menu-hero-open-stats" type="button">Відкрити статистику</button>
-                        <button class="menu-cinematic-cta menu-cinematic-cta-secondary" id="menu-hero-open-support" type="button">Підтримка онлайн</button>
+                        <button class="menu-cinematic-cta menu-cinematic-cta-primary" id="menu-hero-open-stats" type="button">${isUa ? 'Відкрити статистику' : 'Открыть статистику'}</button>
+                        <button class="menu-cinematic-cta menu-cinematic-cta-secondary" id="menu-hero-open-support" type="button">${isUa ? 'Підтримка онлайн' : 'Поддержка онлайн'}</button>
                     </div>
                 </div>
                 <div class="menu-cinematic-visual">
@@ -2718,6 +3167,28 @@ function renderMenuDashboard() {
                 </div>
             </div>
         </section>
+        <div class="menu-priority-strip">
+            ${priorityActions.map((item, index) => `
+                <button class="menu-priority-chip menu-priority-${item.tone}" type="button" data-menu-priority="${index}">
+                    <span>${item.label}</span>
+                    <strong>${item.value}</strong>
+                </button>
+            `).join('')}
+        </div>
+        <div class="menu-route-rail" aria-label="${isUa ? 'Швидкі переходи' : 'Быстрые переходы'}">
+            <button class="menu-route-card menu-route-shop" type="button" data-menu-route="shop">
+                <span>${isUa ? 'Магазин' : 'Магазин'}</span>
+                <strong>${isUa ? 'Посилити загін' : 'Усилить отряд'}</strong>
+            </button>
+            <button class="menu-route-card menu-route-farm" type="button" data-menu-route="mines">
+                <span>${isUa ? 'Герої' : 'Герои'}</span>
+                <strong>${readyIncome > 0 ? (isUa ? 'Є збір' : 'Есть сбор') : (isUa ? 'Дохід live' : 'Доход live')}</strong>
+            </button>
+            <button class="menu-route-card menu-route-profile" type="button" data-menu-route="profile">
+                <span>${isUa ? 'Профіль' : 'Профиль'}</span>
+                <strong>${pendingFinance > 0 ? (isUa ? 'Фінанси чекають' : 'Финансы ждут') : (isUa ? 'Баланс та заявки' : 'Баланс и заявки')}</strong>
+            </button>
+        </div>
         <div class="menu-dashboard-head menu-dashboard-head-secondary">
             <div class="menu-dashboard-topline">
                 <p class="section-label">${heroText.actionHub}</p>
@@ -2739,34 +3210,53 @@ function renderMenuDashboard() {
         </a>
     `;
 
-    const grid = document.createElement('div');
-    grid.className = 'menu-dashboard-grid';
-    cards.forEach((item, i) => {
-        const card = document.createElement('button');
-        card.type = 'button';
-        card.className = `menu-hub-card menu-hub-accent-${item.accent}`;
-        card.style.animationDelay = `${i * 0.06}s`;
-        card.innerHTML = `
-            <div class="menu-hub-head">
-                <span class="menu-hub-icon menu-hub-icon-${item.accent}">${item.icon}</span>
-                ${item.badge ? '<span class="menu-hub-badge"></span>' : ''}
-            </div>
-            <div class="menu-hub-body">
-                <span class="menu-hub-label">${item.title}</span>
-                <strong class="menu-hub-value">${item.value}</strong>
-            </div>
-            <span class="menu-hub-action">${heroText.menuOpen} <span class="menu-hub-arrow">→</span></span>
-        `;
-        card.addEventListener('click', item.action);
-        grid.appendChild(card);
+    container.querySelectorAll('[data-menu-priority]').forEach((button) => {
+        const index = Number(button.dataset.menuPriority || -1);
+        if (priorityActions[index]) button.addEventListener('click', priorityActions[index].action);
     });
-    container.appendChild(grid);
+
+    container.querySelectorAll('[data-menu-route]').forEach((button) => {
+        button.addEventListener('click', () => navigateTo(button.dataset.menuRoute));
+    });
+
+    const groups = document.createElement('div');
+    groups.className = 'menu-action-groups';
+    ['now', 'game', 'community', 'system'].forEach((groupKey) => {
+        const groupCards = cards.filter((item) => item.group === groupKey);
+        if (!groupCards.length) return;
+        const group = document.createElement('section');
+        group.className = `menu-action-group menu-action-group-${groupKey}`;
+        group.innerHTML = `<div class="menu-action-group-title"><span>${groupLabels[groupKey]}</span></div>`;
+        const grid = document.createElement('div');
+        grid.className = 'menu-dashboard-grid menu-dashboard-grid-compact';
+        groupCards.forEach((item, i) => {
+            const card = document.createElement('button');
+            card.type = 'button';
+            card.className = `menu-hub-card menu-hub-accent-${item.accent}`;
+            card.style.animationDelay = `${(i + cards.indexOf(item)) * 0.035}s`;
+            card.innerHTML = `
+                <div class="menu-hub-head">
+                    <span class="menu-hub-icon menu-hub-icon-${item.accent}">${item.icon}</span>
+                    ${item.badge ? '<span class="menu-hub-badge"></span>' : ''}
+                </div>
+                <div class="menu-hub-body">
+                    <span class="menu-hub-label">${item.title}</span>
+                    <strong class="menu-hub-value">${item.value}</strong>
+                </div>
+                <span class="menu-hub-action">${heroText.menuOpen} <span class="menu-hub-arrow">→</span></span>
+            `;
+            card.addEventListener('click', item.action);
+            grid.appendChild(card);
+        });
+        group.appendChild(grid);
+        groups.appendChild(group);
+    });
+    container.appendChild(groups);
 
     const openStatsBtn = document.getElementById('menu-hero-open-stats');
     if (openStatsBtn) {
         openStatsBtn.addEventListener('click', () => {
-            handleNavigation('stats');
-            setActiveNavButton('stats');
+            navigateTo('stats');
         });
     }
 
@@ -2813,7 +3303,26 @@ function renderReleaseList(targetId, options = {}) {
 
     const heroText = getHeroTextSet();
     const locale = LANGUAGE_TO_LOCALE[getCurrentLanguage()] || 'ru-RU';
-    list.innerHTML = `<div class="menu-release-empty">${heroText.menuUpdatesLoading}</div>`;
+    const skeletonCount = Number.isFinite(options.limit) && options.limit > 0
+        ? Math.min(options.limit, 3)
+        : 3;
+    list.innerHTML = Array.from({ length: skeletonCount }, (_, i) => `
+        <article class="menu-release-card menu-release-skeleton${i === 0 ? ' is-current' : ''}" aria-hidden="true">
+            <div class="menu-release-card-topline">
+                <div class="menu-release-version-wrap">
+                    <span class="skeleton-text-line" style="width:54px;height:14px;margin:0;"></span>
+                    <span class="skeleton-text-line" style="width:72px;height:12px;margin:0;"></span>
+                </div>
+                <span class="skeleton-text-line" style="width:64px;height:12px;margin:0;"></span>
+            </div>
+            <span class="skeleton-text-line" style="width:70%;height:14px;margin:10px 0 12px;"></span>
+            <div class="menu-release-points">
+                <span class="skeleton-text-line" style="width:90%;"></span>
+                <span class="skeleton-text-line" style="width:80%;"></span>
+                <span class="skeleton-text-line" style="width:60%;"></span>
+            </div>
+        </article>
+    `).join('');
 
     fetchVersionJson().then((versionData) => {
         if (!list.isConnected) return;
@@ -2903,7 +3412,7 @@ function initAdminInlineTabs(container) {
     };
     bindClick('admin-add-balance', () => openAdminBalanceModal('add'));
     bindClick('admin-subtract-balance', () => openAdminBalanceModal('subtract'));
-    bindClick('admin-open-audit', () => { handleNavigation('audit'); });
+    bindClick('admin-open-audit', () => navigateTo('audit'));
     bindClick('admin-grant-access', openAdminAccessModal);
     bindClick('admin-finance-settings', openFinanceSettingsModal);
 
@@ -3096,7 +3605,6 @@ function createRequestCard(request, options = {}) {
 function renderUserRequests() {
     const container = document.getElementById('user-requests-list');
     if (!container || !window.gameDB) return;
-    if (!document.getElementById('admin-modal')?.classList.contains('modal-active')) return;
 
     const user = window.gameDB.getUser();
     const requests = window.gameDB.getRequests().filter((item) => String(item.userId) === String(user.id));
@@ -3387,6 +3895,86 @@ function _taskCategoryInfo(task, index, t) {
     return cats[index % cats.length];
 }
 
+function _taskActionInfo(task, user) {
+    const isUa = getCurrentLanguage() === 'ua';
+    const combined = `${task?.title || ''} ${task?.description || ''}`.toLowerCase();
+    const hasHeroes = Array.isArray(user?.heroes) && user.heroes.length > 0;
+    if (/deposit|пополн|поповн|invest|ton|баланс/.test(combined)) {
+        return { label: isUa ? 'До фінансів' : 'К финансам', action: () => {
+            navigateTo('profile');
+            setTimeout(() => document.querySelector('.prf-finance-block')?.scrollIntoView({ behavior: isPerfReducedMode() ? 'auto' : 'smooth', block: 'start' }), 180);
+        }};
+    }
+    if (/trade|обмен|обмін|exchange|rnx/.test(combined)) {
+        return { label: isUa ? 'Обміняти' : 'Обменять', action: () => {
+            navigateTo('profile');
+            setTimeout(() => document.getElementById('exchange-btn')?.click(), 240);
+        }};
+    }
+    if (/referral|refer|invite|приглас|реферал/.test(combined)) {
+        return { label: isUa ? 'Запросити' : 'Пригласить', action: () => navigateTo('referral') };
+    }
+    if (/hero|герой|герої|buy|купи|purchase/.test(combined)) {
+        return { label: hasHeroes ? (isUa ? 'До ферми' : 'К ферме') : (isUa ? 'До магазину' : 'В магазин'), action: () => navigateTo(hasHeroes ? 'mines' : 'shop') };
+    }
+    if (/mine|шахт|доход|дохід|income|прибыль/.test(combined)) {
+        return { label: isUa ? 'До ферми' : 'К ферме', action: () => navigateTo('mines') };
+    }
+    if (/telegram|subscribe|follow|channel|group|join|соц|підпис/.test(combined)) {
+        return { label: isUa ? 'Відкрити' : 'Открыть', action: () => window.open('https://t.me/RoboNexus_team', '_blank', 'noopener,noreferrer') };
+    }
+    return { label: isUa ? 'Підтримка' : 'Поддержка', action: () => openSupportModal() };
+}
+
+function _buildGuidedTasks(user, locale) {
+    const isUa = getCurrentLanguage() === 'ua';
+    const heroes = Array.isArray(user?.heroes) ? user.heroes : [];
+    const enriched = heroes.map((hero) => enrichHeroWithEconomy(hero, heroes));
+    const readyIncome = enriched.filter((hero) => hero.countdown === getHeroTextSet().cycleReady).length;
+    return [
+        {
+            id: 'guide_first_hero',
+            title: isUa ? 'Отримайте першого героя' : 'Получите первого героя',
+            description: heroes.length > 0
+                ? (isUa ? 'Герой уже в коллекції. Перейдіть у ферму, щоб стежити за доходом.' : 'Герой уже в коллекции. Перейдите в ферму, чтобы следить за доходом.')
+                : (isUa ? 'Купіть або отримайте стартового героя, щоб запустити майнінг RNX.' : 'Купите или получите стартового героя, чтобы запустить майнинг RNX.'),
+            reward: 0,
+            progress: heroes.length > 0 ? 100 : 0,
+            statusLabel: heroes.length > 0 ? (isUa ? 'готово' : 'готово') : '0/1',
+            category: { color: 'purple', label: isUa ? 'Старт' : 'Старт' },
+            icon: _taskAutoIcon({ title: 'hero' }, 0),
+            actionLabel: heroes.length > 0 ? (isUa ? 'До ферми' : 'К ферме') : (isUa ? 'В магазин' : 'В магазин'),
+            action: () => navigateTo(heroes.length > 0 ? 'mines' : 'shop')
+        },
+        {
+            id: 'guide_income',
+            title: isUa ? 'Перевірте дохід ферми' : 'Проверьте доход фермы',
+            description: readyIncome > 0
+                ? (isUa ? `Готово до збору: ${formatNumber(readyIncome, locale)}.` : `Готово к сбору: ${formatNumber(readyIncome, locale)}.`)
+                : (isUa ? 'Ферма показує поточний цикл, таймер і прогноз доходу.' : 'Ферма показывает текущий цикл, таймер и прогноз дохода.'),
+            reward: 0,
+            progress: heroes.length > 0 ? (readyIncome > 0 ? 100 : 55) : 0,
+            statusLabel: readyIncome > 0 ? (isUa ? 'збір' : 'сбор') : (heroes.length > 0 ? 'live' : '0%'),
+            category: { color: 'green', label: isUa ? 'Ферма' : 'Ферма' },
+            icon: _taskAutoIcon({ title: 'mine income' }, 1),
+            actionLabel: isUa ? 'До ферми' : 'К ферме',
+            action: () => navigateTo('mines')
+        },
+        {
+            id: 'guide_referral',
+            title: isUa ? 'Запросіть друга' : 'Пригласите друга',
+            description: isUa ? 'Реферальна сторінка тримає посилання і статистику запрошень.' : 'Реферальная страница держит ссылку и статистику приглашений.',
+            reward: 0,
+            progress: Number(user?.stats?.referrals || 0) > 0 ? 100 : 20,
+            statusLabel: formatNumber(Number(user?.stats?.referrals || 0), locale),
+            category: { color: 'cyan', label: isUa ? 'Соц' : 'Соц' },
+            icon: _taskAutoIcon({ title: 'referral invite' }, 2),
+            actionLabel: isUa ? 'Відкрити' : 'Открыть',
+            action: () => navigateTo('referral')
+        }
+    ];
+}
+
 function renderTasks() {
     const container = document.getElementById('tasks-list');
     if (!container || !window.gameDB) return;
@@ -3394,11 +3982,15 @@ function renderTasks() {
 
     const t = getTranslations();
     const locale = LANGUAGE_TO_LOCALE[getCurrentLanguage()] || 'ru-RU';
+    const isUa = getCurrentLanguage() === 'ua';
+    const user = window.gameDB.getUser();
     const tasks = window.gameDB.getTasks().filter((item) => item.status === 'active');
     container.innerHTML = '';
 
     // ── Cinematic banner ──
     const totalReward = tasks.reduce((sum, task) => sum + Number(task.reward || 0), 0);
+    const heroCount = Array.isArray(user?.heroes) ? user.heroes.length : 0;
+    const guideProgress = Math.round((Math.min(1, heroCount) + (Number(user?.stats?.referrals || 0) > 0 ? 1 : 0) + (heroCount > 0 ? 1 : 0)) / 3 * 100);
     const banner = document.createElement('section');
     banner.className = 'task-cinematic-banner';
     banner.innerHTML = `
@@ -3415,6 +4007,10 @@ function renderTasks() {
                     <span>${t.taskPoolLabel || t.taskReward}</span>
                     <strong>${formatRnx(totalReward, locale)}</strong>
                 </div>
+                <div class="task-cinematic-chip">
+                    <span>${isUa ? 'Маршрут' : 'Маршрут'}</span>
+                    <strong>${guideProgress}%</strong>
+                </div>
             </div>
         </div>
         <div class="task-cinematic-visual">
@@ -3425,13 +4021,47 @@ function renderTasks() {
     `;
     container.appendChild(banner);
 
+    const overview = document.createElement('div');
+    overview.className = 'task-overview-strip';
+    overview.innerHTML = `
+        <div class="task-overview-copy">
+            <span>${isUa ? 'Сьогодні' : 'Сегодня'}</span>
+            <strong>${tasks.length > 0 ? (isUa ? 'Є активні нагороди' : 'Есть активные награды') : (isUa ? 'Маршрут без активних нагород' : 'Маршрут без активных наград')}</strong>
+        </div>
+        <div class="task-overview-progress" aria-label="${guideProgress}%">
+            <span style="width:${guideProgress}%"></span>
+        </div>
+    `;
+    container.appendChild(overview);
+
     if (!tasks.length) {
-        const empty = document.createElement('div');
-        empty.className = 'request-card';
-        empty.style.textAlign = 'center';
-        empty.style.padding = '28px 16px';
-        empty.innerHTML = `<div style="font-size:32px;margin-bottom:10px;">📋</div><div style="color:var(--muted);font-size:14px;">${t.noTasks}</div>`;
-        container.appendChild(empty);
+        const guided = document.createElement('div');
+        guided.className = 'task-guided-list';
+        _buildGuidedTasks(user, locale).forEach((task) => {
+            const card = document.createElement('article');
+            card.className = 'task-card task-card-v2 task-guide-card';
+            card.innerHTML = `
+                <div class="task-v2-top">
+                    <div class="task-v2-num">${task.statusLabel}</div>
+                    <span class="task-v2-cat task-v2-cat-${task.category.color}">${task.category.label}</span>
+                </div>
+                <div class="task-v2-body">
+                    <div class="task-v2-icon task-v2-icon-${task.category.color}">${task.icon}</div>
+                    <div class="task-v2-content">
+                        <div class="task-v2-title">${escapeHTML(task.title)}</div>
+                        <div class="task-v2-desc">${escapeHTML(task.description)}</div>
+                    </div>
+                </div>
+                <div class="task-progress-line"><span style="width:${Math.max(0, Math.min(100, task.progress))}%"></span></div>
+                <div class="task-v2-footer">
+                    <div class="task-v2-reward task-v2-reward-muted">${isUa ? 'Підказка' : 'Подсказка'}</div>
+                    <button class="task-v2-claim-btn" type="button">${task.actionLabel}</button>
+                </div>
+            `;
+            card.querySelector('.task-v2-claim-btn')?.addEventListener('click', task.action);
+            guided.appendChild(card);
+        });
+        container.appendChild(guided);
         return;
     }
 
@@ -3440,6 +4070,7 @@ function renderTasks() {
     tasks.forEach((task, index) => {
         const icon = _taskAutoIcon(task, index);
         const cat = _taskCategoryInfo(task, index, t);
+        const taskAction = _taskActionInfo(task, user);
         const num = String(index + 1).padStart(2, '0');
         const card = document.createElement('article');
         card.className = 'task-card task-card-v2';
@@ -3452,17 +4083,18 @@ function renderTasks() {
             <div class="task-v2-body">
                 <div class="task-v2-icon task-v2-icon-${cat.color}">${icon}</div>
                 <div class="task-v2-content">
-                    <div class="task-v2-title">${task.title}</div>
-                    <div class="task-v2-desc">${task.description}</div>
+                    <div class="task-v2-title">${escapeHTML(task.title)}</div>
+                    <div class="task-v2-desc">${escapeHTML(task.description)}</div>
                 </div>
             </div>
+            <div class="task-progress-line"><span style="width:${Math.min(100, Math.max(18, Number(task.progress || 0) || 35))}%"></span></div>
             <div class="task-v2-footer">
                 <div class="task-v2-reward">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="14" height="14"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                     <span>${formatRnx(task.reward, locale)}</span>
                 </div>
                 <button class="task-v2-claim-btn" type="button" data-task-id="${task.id}">
-                    ${t.taskClaimBtn || 'Выполнить'}
+                    ${taskAction.label || t.taskClaimBtn || 'Выполнить'}
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                 </button>
             </div>
@@ -3473,8 +4105,8 @@ function renderTasks() {
 
     list.querySelectorAll('.task-v2-claim-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
-            showNotification(t.taskClaimSent || t.requestCreated || 'Запрос отправлен', 'info');
-            openSupportModal();
+            const task = tasks.find((item) => String(item.id) === String(btn.dataset.taskId));
+            _taskActionInfo(task, user).action();
         });
     });
 }
@@ -3569,8 +4201,7 @@ function renderHistorySection() {
         const statsBtn = document.getElementById('history-hero-stats-btn');
         if (statsBtn) {
             statsBtn.addEventListener('click', () => {
-                handleNavigation('stats');
-                setActiveNavButton('stats');
+                navigateTo('stats');
             });
         }
     }
@@ -4184,6 +4815,58 @@ const DEPOSIT_TIMER_SECONDS = 15 * 60; // 15 minutes
 
 let _depositTimerInterval = null;
 
+function getDepositFlowText() {
+    const ua = getCurrentLanguage() === 'ua';
+    return {
+        smartPayment: 'SMART PAYMENT',
+        title: ua ? 'Оплата під контролем' : 'Оплата под контролем',
+        subtitle: ua
+            ? 'Оберіть мережу та суму, після чого система підготує точні реквізити для оплати.'
+            : 'Выберите сеть и сумму, после чего система подготовит точные реквизиты для оплаты.',
+        tonSubtitle: ua
+            ? 'TON-перекази відстежуються автоматично за кодом платежу, тому важливо вказати точну суму.'
+            : 'TON-переводы отслеживаются автоматически по коду платежа, поэтому важно указать точную сумму.',
+        manualSubtitle: ua
+            ? 'Перевірте мережу, адресу та код платежу перед відправкою, щоб заявка пройшла без затримок.'
+            : 'Проверьте сеть, адрес и код платежа перед отправкой, чтобы заявка прошла без задержек.',
+        method: ua ? 'Метод' : 'Метод',
+        amount: ua ? 'Сума' : 'Сумма',
+        status: ua ? 'Статус' : 'Статус',
+        ready: ua ? 'Готово' : 'Готово',
+        autoDetect: ua ? 'Авто-перевірка' : 'Авто-проверка',
+        manualCheck: ua ? 'Ручна перевірка' : 'Ручная проверка',
+        upTo5: ua ? 'до 5 хв' : 'до 5 мин',
+        fiveTo30: ua ? '5-30 хв' : '5-30 мин',
+        methodLabel: ua ? 'Спосіб' : 'Способ',
+        next: ua ? 'Далі' : 'Далее',
+        remaining: ua ? 'залишилось' : 'осталось',
+        payable: ua ? 'До оплати' : 'К оплате',
+        network: ua ? 'Мережа' : 'Сеть',
+        paymentCode: ua ? 'Код платежу' : 'Код платежа',
+        address: ua ? 'Адреса' : 'Адрес',
+        copy: ua ? 'Копіювати' : 'Копировать',
+        qrHint: ua ? 'Скануйте QR для швидкої оплати' : 'Сканируйте QR для быстрой оплаты',
+        back: ua ? 'Назад' : 'Назад',
+        transferred: ua ? 'Я переказав' : 'Я перевёл',
+        sentTitle: ua ? 'Заявку відправлено!' : 'Заявка отправлена!',
+        sentSub: ua
+            ? 'Ми отримали вашу заявку на поповнення. Після перевірки транзакції баланс буде зараховано.'
+            : 'Мы получили вашу заявку на пополнение. После проверки транзакции баланс будет зачислен.',
+        close: ua ? 'Закрити' : 'Закрыть',
+        expired: ua ? 'Час вийшов. Спробуйте ще раз.' : 'Время вышло. Попробуйте ещё раз.',
+        autoDetecting: ua ? 'Автовизначення транзакції...' : 'Автоопределение транзакции...',
+        detectedTitle: ua ? 'Поповнення TON' : 'Пополнение TON',
+        detectedMessage: ua ? 'Транзакцію виявлено! Баланс поповнено автоматично.' : 'Транзакция обнаружена! Баланс пополнен автоматически.',
+        adminDepositTitle: ua ? 'Нова заявка на поповнення' : 'Новая заявка на пополнение'
+    };
+}
+
+function closeDepositModal() {
+    stopDepositTimer();
+    stopTonAutoDetect();
+    closeModal('deposit-flow-modal');
+}
+
 function generatePaymentCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = 'PAY-';
@@ -4193,6 +4876,7 @@ function generatePaymentCode() {
 
 function openDepositModal() {
     const t = getTranslations();
+    const depositText = getDepositFlowText();
     const finance = window.gameDB.getFinanceConfig().deposit;
     const methods = getEnabledMethods('deposit');
 
@@ -4208,18 +4892,21 @@ function openDepositModal() {
         banner.className = 'deposit-cinematic-banner';
         banner.innerHTML = `
             <div class="deposit-cinematic-copy">
-                <span class="deposit-cinematic-kicker">SMART PAYMENT</span>
-                <h4 class="deposit-cinematic-title">Оплата під контролем</h4>
-                <p class="deposit-cinematic-subtitle" id="deposit-hero-subtitle">Оберіть мережу та суму, після чого система підготує точні реквізити для оплати.</p>
+                <span class="deposit-cinematic-kicker" id="deposit-hero-kicker">SMART PAYMENT</span>
+                <h4 class="deposit-cinematic-title" id="deposit-hero-title">Оплата под контролем</h4>
+                <p class="deposit-cinematic-subtitle" id="deposit-hero-subtitle">Выберите сеть и сумму, после чего система подготовит точные реквизиты для оплаты.</p>
                 <div class="deposit-cinematic-chips">
-                    <div class="deposit-cinematic-chip"><span>Метод</span><strong id="deposit-hero-method">—</strong></div>
-                    <div class="deposit-cinematic-chip"><span>Сума</span><strong id="deposit-hero-amount">—</strong></div>
-                    <div class="deposit-cinematic-chip"><span>Статус</span><strong id="deposit-hero-status">Готово</strong></div>
+                    <div class="deposit-cinematic-chip"><span id="deposit-hero-method-label">Метод</span><strong id="deposit-hero-method">—</strong></div>
+                    <div class="deposit-cinematic-chip"><span id="deposit-hero-amount-label">Сумма</span><strong id="deposit-hero-amount">—</strong></div>
+                    <div class="deposit-cinematic-chip"><span id="deposit-hero-status-label">Статус</span><strong id="deposit-hero-status">Готово</strong></div>
                 </div>
             </div>
             <div class="deposit-cinematic-visual">
                 <div class="deposit-cinematic-ring"></div>
-                <div class="deposit-cinematic-badge" id="deposit-hero-speed">1–5 хв</div>
+                <div class="deposit-cinematic-badge" id="deposit-hero-speed">1-5 мин</div>
+                <div class="deposit-payment-glyph" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/><path d="M8 15h3"/><path d="M15 15h1"/></svg>
+                </div>
                 <img class="deposit-cinematic-figure" src="images/hero_neon_crusher.png" alt="" loading="lazy" decoding="async">
             </div>
         `;
@@ -4236,14 +4923,12 @@ function openDepositModal() {
         const selected = methods.find((item) => item.value === methodValue) || methods[0];
         const isTon = methodValue === 'ton';
         const amountText = amountValue > 0 ? `${amountValue} TON` : `${finance.min}-${finance.max} TON`;
-        const subtitle = isTon
-            ? 'TON-перекази відстежуються автоматично по коду платежу, тому важливо вказати точну суму.'
-            : 'Перевірте мережу, адресу та код платежу перед відправкою, щоб заявка пройшла без затримок.';
+        const subtitle = isTon ? depositText.tonSubtitle : depositText.manualSubtitle;
 
         setText('deposit-hero-method', selected?.label || '—');
         setText('deposit-hero-amount', amountText);
-        setText('deposit-hero-status', isTon ? 'Авто-детект' : 'Ручна перевірка');
-        setText('deposit-hero-speed', isTon ? 'до 5 хв' : '5–30 хв');
+        setText('deposit-hero-status', isTon ? depositText.autoDetect : depositText.manualCheck);
+        setText('deposit-hero-speed', isTon ? depositText.upTo5 : depositText.fiveTo30);
         setText('deposit-hero-subtitle', subtitle);
 
         const banner = document.getElementById('deposit-cinematic-banner');
@@ -4251,6 +4936,35 @@ function openDepositModal() {
             banner.classList.toggle('is-ton', isTon);
         }
     };
+
+    setText('deposit-hero-kicker', depositText.smartPayment);
+    setText('deposit-hero-title', depositText.title);
+    setText('deposit-hero-method-label', depositText.method);
+    setText('deposit-hero-amount-label', depositText.amount);
+    setText('deposit-hero-status-label', depositText.status);
+    setText('deposit-hero-status', depositText.ready);
+    setText('deposit-timer-label', depositText.remaining);
+    setText('deposit-amount-badge-label', depositText.payable);
+    setText('deposit-payment-method-label', depositText.network);
+    setText('deposit-payment-code-label', depositText.paymentCode);
+    setText('deposit-wallet-label', depositText.address);
+    setText('deposit-qr-hint', depositText.qrHint);
+    setText('deposit-success-title', depositText.sentTitle);
+    setText('deposit-success-sub', depositText.sentSub);
+    setText('deposit-success-amount-label', depositText.amount);
+    setText('deposit-success-method-label', depositText.method);
+    setText('deposit-success-code-label', depositText.paymentCode);
+    setText('deposit-step2-back', `← ${depositText.back}`);
+    setText('deposit-step2-next', `${depositText.transferred} ✓`);
+    setText('deposit-step3-close', depositText.close);
+    const methodLabelEl = document.getElementById('deposit-method-label');
+    if (methodLabelEl) methodLabelEl.textContent = depositText.methodLabel;
+    const closeButton = document.getElementById('deposit-modal-close');
+    if (closeButton) closeButton.setAttribute('aria-label', depositText.close);
+    ['deposit-code-copy', 'deposit-wallet-copy'].forEach((id) => {
+        const btn = document.getElementById(id);
+        if (btn) btn.title = depositText.copy;
+    });
 
     // Reset to step 1
     ['deposit-step-1','deposit-step-2','deposit-step-3'].forEach((id, i) => {
@@ -4301,6 +5015,7 @@ function openDepositModal() {
     // Step 1 → Step 2
     const nextBtn = document.getElementById('deposit-step1-next');
     if (nextBtn) {
+        nextBtn.textContent = `${depositText.next} →`;
         nextBtn.onclick = () => {
             const amount = Number(amountInput?.value || 0);
             if (!Number.isFinite(amount) || amount < finance.min || amount > finance.max) {
@@ -4345,7 +5060,7 @@ function openDepositModal() {
                 stopTonAutoDetect();
                 el('deposit-step-2').classList.add('hidden');
                 el('deposit-step-1').classList.remove('hidden');
-                showNotification('Час вийшов. Спробуйте ще раз.', 'error');
+                showNotification(depositText.expired, 'error');
             });
 
             // TON auto-detect
@@ -4372,13 +5087,13 @@ function openDepositModal() {
                     el('deposit-step-3').classList.remove('hidden');
                     triggerHaptic('medium');
                     renderApp();
-                    showNotification('✅ Транзакцію виявлено! Баланс поповнено автоматично.', 'success', {
-                        persist: true, title: 'Поповнення TON', audience: 'user', userId: user.id
+                    showNotification(depositText.detectedMessage, 'success', {
+                        persist: true, title: depositText.detectedTitle, audience: 'user', userId: user.id
                     });
                     if (window.gameDB) {
                         window.gameDB.createNotification({
                             type: 'success',
-                            title: '🤖 [Авто] Нова заявка на поповнення',
+                            title: `[Auto] ${depositText.adminDepositTitle}`,
                             message: `${user.username || user.id} · ${amount} TON · TON (авто) · Код: ${payCode}`,
                             audience: 'admin', userId: user.id
                         });
@@ -4425,7 +5140,7 @@ function openDepositModal() {
                 if (window.gameDB) {
                     window.gameDB.createNotification({
                         type: 'info',
-                        title: `🔔 [Администратор] Новая заявка на пополнение`,
+                        title: `[Admin] ${depositText.adminDepositTitle}`,
                         message: `Пользователь ${user.username || user.id} · ${amount} TON · ${methodLabel} · Код: ${payCode}`,
                         audience: 'admin',
                         userId: user.id
@@ -4445,13 +5160,11 @@ function openDepositModal() {
     }
 
     // Close buttons
-    const closeFn = () => {
-        stopDepositTimer();
-        stopTonAutoDetect();
-        closeModal('form-modal');
-    };
-    document.getElementById('deposit-modal-close').onclick = closeFn;
-    document.getElementById('deposit-step3-close').onclick = () => { closeFn(); showNotification(t.requestCreated, 'success', { persist: true }); };
+    const closeFn = closeDepositModal;
+    const modalClose = document.getElementById('deposit-modal-close');
+    const step3Close = document.getElementById('deposit-step3-close');
+    if (modalClose) modalClose.onclick = closeFn;
+    if (step3Close) step3Close.onclick = closeFn;
     modal.onclick = (e) => { if (e.target === modal) closeFn(); };
 
     modal.classList.add('modal-active');
@@ -4505,11 +5218,12 @@ function startTonAutoDetect({ wallet, amount, payCode, onDetected }) {
     // Inject badge into step-2
     const step2 = document.getElementById('deposit-step-2');
     if (step2 && !step2.querySelector('.deposit-auto-detect')) {
+        const depositText = getDepositFlowText();
         const badge = document.createElement('div');
         badge.className = 'deposit-auto-detect';
-        badge.innerHTML = `<span class="deposit-auto-detect-dot"></span>Автовизначення транзакції...`;
-        const nextBtn = step2.querySelector('#deposit-step2-next');
-        if (nextBtn) step2.insertBefore(badge, nextBtn);
+        badge.innerHTML = `<span class="deposit-auto-detect-dot"></span>${depositText.autoDetecting}`;
+        const actions = step2.querySelector('.deposit-step2-actions');
+        if (actions && actions.parentElement === step2) step2.insertBefore(badge, actions);
         else step2.appendChild(badge);
     }
 
@@ -5426,6 +6140,7 @@ function renderRatingSection() {
 function handleNavigation(type) {
     const shopSection = document.getElementById('shop-section');
     const profileSection = document.querySelector('.profile-panel');
+    const homeSection = document.getElementById('home-section');
     const myHeroesSection = document.getElementById('my-heroes-section');
     const tasksSection = document.getElementById('tasks-section');
     const historySection = document.getElementById('history-section');
@@ -5445,6 +6160,7 @@ function handleNavigation(type) {
 
     if (shopSection) shopSection.classList.add('hidden');
     if (profileSection) profileSection.classList.add('hidden');
+    if (homeSection) homeSection.classList.add('hidden');
     if (myHeroesSection) myHeroesSection.classList.add('hidden');
     if (tasksSection) tasksSection.classList.add('hidden');
     if (historySection) historySection.classList.add('hidden');
@@ -5463,8 +6179,27 @@ function handleNavigation(type) {
         }
     }
 
+    document.body.classList.toggle('is-home', type === 'home');
+    document.body.dataset.route = type;
+    queueModelViewerPlaybackSync();
+    if (type === 'home') {
+        if (homeSection) {
+            showAppView(homeSection, direction);
+            renderHome();
+            queueModelViewerPlaybackSync();
+        }
+        return;
+    }
+
     if (type === 'profile') {
-        if (profileSection) showAppView(profileSection, direction);
+        if (profileSection) {
+            showAppView(profileSection, direction);
+            renderDailyStreak();
+            renderProfileBalanceFlow();
+            renderProfileActivityHeatmap();
+            renderProfileCompactDashboard();
+            renderUserRequests();
+        }
         return;
     }
 
@@ -5472,6 +6207,7 @@ function handleNavigation(type) {
         if (shopSection) {
             showAppView(shopSection, direction);
             renderShop();
+            queueModelViewerPlaybackSync();
         }
         return;
     }
@@ -5480,6 +6216,7 @@ function handleNavigation(type) {
         if (myHeroesSection) {
             showAppView(myHeroesSection, direction);
             renderMyHeroes();
+            queueModelViewerPlaybackSync();
         }
         return;
     }
@@ -5524,6 +6261,14 @@ function handleNavigation(type) {
         return;
     }
 
+    if (type === 'audit') {
+        if (auditSection) {
+            showAppView(auditSection, direction);
+            renderAuditSection();
+        }
+        return;
+    }
+
     if (type === 'menu') {
         if (menuSection) {
             showAppView(menuSection, direction);
@@ -5535,17 +6280,93 @@ function handleNavigation(type) {
     showNotification(getTranslations().comingSoon, 'info');
 }
 
+function getRouteNavParent(type, explicitNav) {
+    if (Object.prototype.hasOwnProperty.call(ROUTE_NAV_PARENT, type)) {
+        return explicitNav !== undefined ? explicitNav : ROUTE_NAV_PARENT[type];
+    }
+    return explicitNav !== undefined ? explicitNav : (NAV_ORDER.includes(type) ? type : null);
+}
+
+function getRouteLabel(type) {
+    const isUa = getCurrentLanguage() === 'ua';
+    const labels = {
+        profile: isUa ? 'Профіль' : 'Профиль',
+        tasks: isUa ? 'Завдання' : 'Задания',
+        referral: isUa ? 'Реферали' : 'Рефералы',
+        rating: isUa ? 'Рейтинг' : 'Рейтинг',
+        history: isUa ? 'Історія' : 'История',
+        audit: isUa ? 'Аудит' : 'Аудит'
+    };
+    return labels[type] || '';
+}
+
+function syncBottomNavRouteContext(type, navType) {
+    const nav = document.querySelector('.bottom-nav');
+    if (!nav) return;
+    const centerLabel = nav.querySelector('.nav-btn[data-nav="home"] .nav-label');
+    if (navType) {
+        nav.removeAttribute('data-route-label');
+        if (centerLabel) {
+            if (centerLabel.dataset.defaultLabel) centerLabel.textContent = centerLabel.dataset.defaultLabel;
+            centerLabel.removeAttribute('data-route-label');
+        }
+        return;
+    }
+    const label = getRouteLabel(type);
+    if (label) {
+        nav.dataset.routeLabel = label;
+        if (centerLabel) {
+            if (!centerLabel.dataset.defaultLabel) centerLabel.dataset.defaultLabel = centerLabel.textContent.trim();
+            centerLabel.dataset.routeLabel = label;
+            centerLabel.textContent = label;
+        }
+    } else {
+        nav.removeAttribute('data-route-label');
+        if (centerLabel) {
+            if (centerLabel.dataset.defaultLabel) centerLabel.textContent = centerLabel.dataset.defaultLabel;
+            centerLabel.removeAttribute('data-route-label');
+        }
+    }
+}
+
+function syncBottomNavLanguage(language = getCurrentLanguage()) {
+    const nav = document.querySelector('.bottom-nav');
+    if (!nav) return;
+    const translations = getTranslations(language);
+    nav.querySelectorAll('.nav-label[data-translate]').forEach((label) => {
+        const key = label.dataset.translate;
+        if (!translations[key]) return;
+        label.dataset.defaultLabel = translations[key];
+        if (!label.dataset.routeLabel) label.textContent = translations[key];
+    });
+    const activeRoute = document.body?.dataset?.route || NAV_ORDER[APP_STATE.activeNavIndex] || 'home';
+    syncBottomNavRouteContext(activeRoute, getRouteNavParent(activeRoute));
+}
+
+function navigateTo(type, options = {}) {
+    if (!type) return;
+    const navType = getRouteNavParent(type, options.nav);
+    handleNavigation(type);
+    setActiveNavButton(navType);
+    syncBottomNavRouteContext(type, navType);
+}
+
 function updateNavIndicator() {
     const indicator = document.getElementById('nav-indicator');
     if (!indicator) return;
     const activeBtn = document.querySelector('.nav-btn.active');
-    if (!activeBtn) return;
+    if (!activeBtn) {
+        indicator.style.opacity = '0';
+        indicator.style.width = '0px';
+        return;
+    }
     const nav = document.querySelector('.bottom-nav');
     if (!nav) return;
     const navRect = nav.getBoundingClientRect();
     const btnRect = activeBtn.getBoundingClientRect();
     indicator.style.left = (btnRect.left - navRect.left) + 'px';
     indicator.style.width = btnRect.width + 'px';
+    indicator.style.opacity = '1';
 }
 
 function setActiveNavButton(type) {
@@ -5594,13 +6415,7 @@ function showAppView(element, direction) {
 
 function openAuditScreen() {
     closeAdminModal();
-    setActiveNavButton('menu');
-    handleNavigation('menu');
-    const menuSection = document.getElementById('menu-section');
-    const auditSection = document.getElementById('audit-section');
-    if (menuSection) menuSection.classList.add('hidden');
-    if (auditSection) showAppView(auditSection);
-    renderAuditSection();
+    navigateTo('audit');
 }
 
 function updateAdminTabBadges() {
@@ -5739,6 +6554,352 @@ function _sparkDailyBuckets(items, getTimeFn, getValFn, days) {
     return buckets;
 }
 
+/* ── Stage 2 #1: Personal 7-day balance flow (deposit / withdraw sparklines) ── */
+function renderProfileBalanceFlow() {
+    if (!window.gameDB) return;
+    const finance = document.querySelector('.prf-finance-block');
+    if (!finance) return;
+
+    let block = document.getElementById('prf-balance-flow');
+    if (!block) {
+        block = document.createElement('div');
+        block.id = 'prf-balance-flow';
+        block.className = 'prf-balance-flow';
+        finance.insertAdjacentElement('afterend', block);
+    }
+
+    const isUa = getCurrentLanguage() === 'ua';
+    const locale = LANGUAGE_TO_LOCALE[getCurrentLanguage()] || 'ru-RU';
+    const user = window.gameDB.data && window.gameDB.data.user ? window.gameDB.data.user : null;
+    const userId = String((user && user.id) || '');
+
+    const allOps = typeof window.gameDB.getFinanceOperations === 'function'
+        ? window.gameDB.getFinanceOperations() : [];
+    const ops = allOps.filter(op => !userId || String(op.userId) === userId);
+
+    const DAYS = 7;
+    const depositOps = ops.filter(o => /deposit|topup|refill/i.test(o.type || ''));
+    const withdrawOps = ops.filter(o => /withdraw/i.test(o.type || ''));
+
+    const depBuckets = _sparkDailyBuckets(depositOps, o => o.createdAt || o.updatedAt, o => Number(o.amount || 0), DAYS);
+    const wdBuckets  = _sparkDailyBuckets(withdrawOps, o => o.createdAt || o.updatedAt, o => Number(o.amount || 0), DAYS);
+
+    const depSum = depBuckets.reduce((a, b) => a + b, 0);
+    const wdSum  = wdBuckets.reduce((a, b) => a + b, 0);
+    const net    = depSum - wdSum;
+
+    const fmtTon = v => `${Number(v).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TON`;
+    const depSpark = depBuckets.some(v => v > 0) ? depBuckets : [0,0,0,0,0,0,0.001];
+    const wdSpark  = wdBuckets.some(v => v > 0)  ? wdBuckets  : [0,0,0,0,0,0,0.001];
+
+    const txt = {
+        title:  isUa ? 'Рух балансу' : 'Движение баланса',
+        period: isUa ? 'за 7 днів' : 'за 7 дней',
+        dep:    isUa ? 'Поповнено' : 'Пополнено',
+        wd:     isUa ? 'Виведено' : 'Выведено',
+        net:    isUa ? 'Чистий потік' : 'Чистый поток',
+        empty:  isUa ? 'немає операцій' : 'нет операций'
+    };
+
+    const netSign = net >= 0 ? '+' : '−';
+    const netStr = `${netSign}${fmtTon(Math.abs(net))}`;
+
+    block.innerHTML = `
+        <div class="pbf-head">
+            <span class="pbf-title">${txt.title}</span>
+            <span class="pbf-period">${txt.period}</span>
+        </div>
+        <div class="pbf-grid">
+            <div class="pbf-cell pbf-cell-dep">
+                <div class="pbf-cell-row">
+                    <span class="pbf-cell-lbl"><span class="pbf-arrow">↓</span> ${txt.dep}</span>
+                    <strong class="pbf-cell-val">${depSum > 0 ? fmtTon(depSum) : `<span class="pbf-empty">${txt.empty}</span>`}</strong>
+                </div>
+                <div class="pbf-cell-spark">${buildSparklineSVG(depSpark, '#4ade80', '#22c55e', 'pbf-dep')}</div>
+            </div>
+            <div class="pbf-cell pbf-cell-wd">
+                <div class="pbf-cell-row">
+                    <span class="pbf-cell-lbl"><span class="pbf-arrow">↑</span> ${txt.wd}</span>
+                    <strong class="pbf-cell-val">${wdSum > 0 ? fmtTon(wdSum) : `<span class="pbf-empty">${txt.empty}</span>`}</strong>
+                </div>
+                <div class="pbf-cell-spark">${buildSparklineSVG(wdSpark, '#f87171', '#ef4444', 'pbf-wd')}</div>
+            </div>
+        </div>
+        <div class="pbf-net ${net >= 0 ? 'is-positive' : 'is-negative'}">
+            <span class="pbf-net-lbl">${txt.net}</span>
+            <span class="pbf-net-val">${netStr}</span>
+        </div>
+    `;
+}
+
+/* ── Stage 2 #2: 12-week activity heatmap (GitHub-style) ── */
+function renderProfileActivityHeatmap() {
+    if (!window.gameDB) return;
+    const anchor = document.getElementById('prf-balance-flow');
+    if (!anchor) return;
+
+    let block = document.getElementById('prf-activity-heatmap');
+    if (!block) {
+        block = document.createElement('div');
+        block.id = 'prf-activity-heatmap';
+        block.className = 'prf-activity-heatmap';
+        anchor.insertAdjacentElement('afterend', block);
+    }
+
+    const isUa = getCurrentLanguage() === 'ua';
+    const locale = LANGUAGE_TO_LOCALE[getCurrentLanguage()] || 'ru-RU';
+    const user = window.gameDB.data && window.gameDB.data.user ? window.gameDB.data.user : null;
+    const userId = String((user && user.id) || '');
+
+    const finOps = typeof window.gameDB.getFinanceOperations === 'function'
+        ? window.gameDB.getFinanceOperations() : [];
+    const heroOps = typeof window.gameDB.getHeroOperations === 'function'
+        ? window.gameDB.getHeroOperations() : [];
+
+    // Aggregate per-day events for the user
+    const WEEKS = 12;
+    const DAYS = WEEKS * 7;
+    const now = new Date();
+    // Anchor to local midnight today; cells go from oldest -> newest, week-aligned to Monday
+    const dayMs = 86400000;
+    const todayLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // We want the rightmost column to contain today; build a map keyed by yyyy-mm-dd local
+    const buckets = new Map();
+    function addEvent(dateStr) {
+        if (!dateStr) return;
+        const t = new Date(dateStr);
+        if (isNaN(t.getTime())) return;
+        const local = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+        const diff = Math.floor((todayLocal - local) / dayMs);
+        if (diff < 0 || diff >= DAYS) return;
+        const key = local.toISOString().slice(0, 10);
+        buckets.set(key, (buckets.get(key) || 0) + 1);
+    }
+    finOps.forEach(op => {
+        if (userId && String(op.userId) !== userId) return;
+        addEvent(op.createdAt || op.updatedAt);
+    });
+    heroOps.forEach(op => {
+        if (userId && String(op.userId) !== userId) return;
+        addEvent(op.createdAt || op.updatedAt);
+    });
+
+    // Build cell list: for each of last DAYS days, in chronological order
+    const cells = [];
+    let maxCount = 0;
+    let totalEvents = 0;
+    let activeDays = 0;
+    for (let i = DAYS - 1; i >= 0; i--) {
+        const d = new Date(todayLocal.getTime() - i * dayMs);
+        const key = d.toISOString().slice(0, 10);
+        const count = buckets.get(key) || 0;
+        if (count > maxCount) maxCount = count;
+        if (count > 0) { activeDays++; totalEvents += count; }
+        cells.push({ date: d, count });
+    }
+
+    // Determine intensity level 0..4
+    function level(count) {
+        if (count <= 0) return 0;
+        if (maxCount <= 1) return count > 0 ? 2 : 0;
+        const ratio = count / maxCount;
+        if (ratio <= 0.25) return 1;
+        if (ratio <= 0.5)  return 2;
+        if (ratio <= 0.75) return 3;
+        return 4;
+    }
+
+    // Group into weekly columns (Mon-first). Pad first week with empty cells before.
+    const firstDate = cells[0].date;
+    const firstDow = (firstDate.getDay() + 6) % 7; // Mon=0..Sun=6
+    const padStart = firstDow;
+    const grid = [];
+    for (let i = 0; i < padStart; i++) grid.push(null);
+    cells.forEach(c => grid.push(c));
+    while (grid.length % 7 !== 0) grid.push(null);
+    const totalWeeks = grid.length / 7;
+
+    // Build SVG-based heatmap (compact, predictable on mobile)
+    const cellSize = 11;
+    const cellGap = 3;
+    const labelW = 14;
+    const monthH = 14;
+    const W = labelW + totalWeeks * (cellSize + cellGap);
+    const H = monthH + 7 * (cellSize + cellGap);
+
+    const dayLabels = isUa ? ['Пн','','Ср','','Пт','',''] : ['Пн','','Ср','','Пт','',''];
+    const monthsShort = isUa
+        ? ['Січ','Лют','Бер','Кві','Тра','Чер','Лип','Сер','Вер','Жов','Лис','Гру']
+        : ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+
+    let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" class="pah-svg" role="img">`;
+    // Day-of-week labels
+    for (let r = 0; r < 7; r++) {
+        if (!dayLabels[r]) continue;
+        const y = monthH + r * (cellSize + cellGap) + cellSize - 1;
+        svg += `<text x="0" y="${y}" class="pah-dow">${dayLabels[r]}</text>`;
+    }
+    // Month labels (only when month changes at top of week)
+    let lastMonth = -1;
+    for (let w = 0; w < totalWeeks; w++) {
+        const top = grid[w * 7];
+        if (!top) continue;
+        const m = top.date.getMonth();
+        if (m !== lastMonth) {
+            const x = labelW + w * (cellSize + cellGap);
+            svg += `<text x="${x}" y="${monthH - 4}" class="pah-month">${monthsShort[m]}</text>`;
+            lastMonth = m;
+        }
+    }
+    // Cells
+    const tipFmt = (d, n) => {
+        const ds = d.toLocaleDateString(locale, { day: '2-digit', month: 'short' });
+        if (n <= 0) return isUa ? `${ds} — без подій` : `${ds} — без событий`;
+        const word = isUa
+            ? (n === 1 ? 'подія' : (n >= 2 && n <= 4 ? 'події' : 'подій'))
+            : (n === 1 ? 'событие' : (n >= 2 && n <= 4 ? 'события' : 'событий'));
+        return `${ds} — ${n} ${word}`;
+    };
+    for (let w = 0; w < totalWeeks; w++) {
+        for (let r = 0; r < 7; r++) {
+            const cell = grid[w * 7 + r];
+            const x = labelW + w * (cellSize + cellGap);
+            const y = monthH + r * (cellSize + cellGap);
+            if (!cell) {
+                svg += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" rx="2" class="pah-cell pah-empty"/>`;
+            } else {
+                const lvl = level(cell.count);
+                const title = tipFmt(cell.date, cell.count);
+                svg += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" rx="2" class="pah-cell pah-l${lvl}"><title>${title}</title></rect>`;
+            }
+        }
+    }
+    svg += `</svg>`;
+
+    const txt = {
+        title:  isUa ? 'Активність' : 'Активность',
+        period: isUa ? '12 тижнів' : '12 недель',
+        legend: isUa ? 'менше' : 'меньше',
+        more:   isUa ? 'більше' : 'больше',
+        active: isUa ? 'активних днів' : 'активных дней',
+        empty:  isUa ? 'Немає активності' : 'Нет активности'
+    };
+
+    const summary = activeDays > 0
+        ? `${activeDays} ${txt.active} · ${totalEvents}`
+        : txt.empty;
+
+    block.innerHTML = `
+        <div class="pah-head">
+            <span class="pah-title">${txt.title}</span>
+            <span class="pah-period">${txt.period}</span>
+        </div>
+        <div class="pah-scroll">${svg}</div>
+        <div class="pah-foot">
+            <span class="pah-summary">${summary}</span>
+            <span class="pah-legend">
+                <span class="pah-legend-lbl">${txt.legend}</span>
+                <span class="pah-cell-mini pah-l0"></span>
+                <span class="pah-cell-mini pah-l1"></span>
+                <span class="pah-cell-mini pah-l2"></span>
+                <span class="pah-cell-mini pah-l3"></span>
+                <span class="pah-cell-mini pah-l4"></span>
+                <span class="pah-legend-lbl">${txt.more}</span>
+            </span>
+        </div>
+    `;
+}
+
+function renderProfileCompactDashboard() {
+    const profile = document.querySelector('.profile-panel');
+    const heroCard = document.querySelector('.prf-hero-card');
+    if (!profile || !heroCard || !window.gameDB) return;
+
+    const isUa = getCurrentLanguage() === 'ua';
+    const locale = LANGUAGE_TO_LOCALE[getCurrentLanguage()] || 'ru-RU';
+    const user = window.gameDB.getUser();
+    const actorId = getActorId();
+    const heroes = Array.isArray(user.heroes) ? user.heroes : [];
+    const requests = typeof window.gameDB.getRequests === 'function'
+        ? window.gameDB.getRequests().filter((item) => String(item.userId || '') === String(actorId || user.id || ''))
+        : [];
+    const pendingRequests = requests.filter((item) => item.status === 'pending').length;
+    const totalBalance = Number(user.balanceBuy || 0) + Number(user.balanceWithdraw || 0);
+    const referralCount = Number(user.stats?.referrals || user.referrals || 0);
+
+    let dashboard = document.getElementById('prf-compact-dashboard');
+    if (!dashboard) {
+        dashboard = document.createElement('div');
+        dashboard.id = 'prf-compact-dashboard';
+        dashboard.className = 'prf-compact-dashboard';
+        heroCard.insertAdjacentElement('afterend', dashboard);
+    }
+
+    const items = [
+        { key: 'balance', label: isUa ? 'Баланс' : 'Баланс', value: `${totalBalance.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TON`, target: '.prf-finance-block' },
+        { key: 'requests', label: isUa ? 'Заявки' : 'Заявки', value: pendingRequests > 0 ? String(pendingRequests) : (isUa ? 'чисто' : 'чисто'), target: '.request-panel' },
+        { key: 'heroes', label: isUa ? 'Герої' : 'Герои', value: formatNumber(heroes.length, locale), action: 'mines' },
+        { key: 'referral', label: isUa ? 'Реферали' : 'Рефералы', value: formatNumber(referralCount, locale), target: '#prf-ref-block' }
+    ];
+
+    dashboard.innerHTML = items.map((item) => `
+        <button class="prf-compact-chip prf-compact-${item.key}" type="button" data-target="${item.target || ''}" data-action="${item.action || ''}">
+            <span>${item.label}</span>
+            <strong>${item.value}</strong>
+        </button>
+    `).join('');
+
+    dashboard.querySelectorAll('.prf-compact-chip').forEach((button) => {
+        button.addEventListener('click', () => {
+            try { triggerHaptic && triggerHaptic('light'); } catch (_) {}
+            const action = button.dataset.action || '';
+            if (action === 'mines') {
+                navigateTo('mines');
+                return;
+            }
+            const target = button.dataset.target ? document.querySelector(button.dataset.target) : null;
+            if (target) {
+                target.classList.remove('is-collapsed');
+                target.scrollIntoView({ behavior: isPerfReducedMode() ? 'auto' : 'smooth', block: 'start' });
+            }
+        });
+    });
+
+    const panels = [
+        { selector: '#prf-ref-block', key: 'ref', title: isUa ? 'Реферальне посилання' : 'Реферальная ссылка', collapsed: true },
+        { selector: '.prf-stats-section', key: 'stats', title: isUa ? 'Статистика' : 'Статистика', collapsed: true },
+        { selector: '#prf-balance-flow', key: 'flow', title: isUa ? 'Рух балансу' : 'Движение баланса', collapsed: true },
+        { selector: '#prf-activity-heatmap', key: 'activity', title: isUa ? 'Активність' : 'Активность', collapsed: true },
+        { selector: '.request-panel', key: 'requests', title: isUa ? 'Фінансові заявки' : 'Финансовые заявки', collapsed: pendingRequests === 0 }
+    ];
+
+    panels.forEach((config) => {
+        const panel = document.querySelector(config.selector);
+        if (!panel) return;
+        panel.classList.add('prf-collapsible-panel');
+        panel.dataset.profilePanel = config.key;
+        let toggle = panel.querySelector(':scope > .prf-collapse-toggle');
+        if (!toggle) {
+            toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'prf-collapse-toggle';
+            panel.prepend(toggle);
+        }
+        toggle.innerHTML = `<span>${config.title}</span><strong>${isUa ? 'Відкрити' : 'Открыть'}</strong>`;
+        if (!panel.dataset.profileCollapseInit) {
+            panel.classList.toggle('is-collapsed', Boolean(config.collapsed));
+            panel.dataset.profileCollapseInit = '1';
+        }
+        toggle.setAttribute('aria-expanded', panel.classList.contains('is-collapsed') ? 'false' : 'true');
+        toggle.onclick = () => {
+            const willCollapse = !panel.classList.contains('is-collapsed');
+            panel.classList.toggle('is-collapsed', willCollapse);
+            toggle.setAttribute('aria-expanded', willCollapse ? 'false' : 'true');
+            try { triggerHaptic && triggerHaptic('light'); } catch (_) {}
+        };
+    });
+}
+
 function buildSparklineSVG(points, lineColor, gradColor, uid) {
     const W = 110, H = 48, PADT = 6, PADR = 8, PADB = 10, PADL = 4;
     const n = points.length;
@@ -5762,6 +6923,845 @@ function buildSparklineSVG(points, lineColor, gradColor, uid) {
     const areaPath = `${linePath} L ${lastX.toFixed(1)},${(H - PADB).toFixed(1)} L ${xs[0].toFixed(1)},${(H - PADB).toFixed(1)} Z`;
     const gradId = `sg-${uid}`, glowId = `gg-${uid}`;
     return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" class="stats-card-spark-svg" data-sparkline="1"><defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${gradColor}" stop-opacity="0.45"/><stop offset="100%" stop-color="${gradColor}" stop-opacity="0"/></linearGradient><filter id="${glowId}" x="-30%" y="-80%" width="160%" height="260%"><feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><path d="${areaPath}" fill="url(#${gradId})" class="spark-area"/><path d="${linePath}" fill="none" stroke="${lineColor}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="spark-line" filter="url(#${glowId})"/><circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="5" fill="${lineColor}" opacity="0.2" class="spark-dot-outer"/><circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="2.8" fill="${lineColor}" class="spark-dot" filter="url(#${glowId})"/></svg>`;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   HOME SCREEN — visual hub with active hero and quick actions
+   ──────────────────────────────────────────────────────────────────── */
+const HOME_HERO_STORAGE_KEY = 'rnxHomeHeroId';
+const HOME_FALLBACK_HERO_ID = 'h5'; // Omega Titan
+
+function _getHomeHeroList() {
+    const owned = (window.gameDB && window.gameDB.data && window.gameDB.data.user && Array.isArray(window.gameDB.data.user.heroes))
+        ? window.gameDB.data.user.heroes
+        : [];
+    const catalog = Array.isArray(window.HEROES) ? window.HEROES : [];
+    // Build full catalog list with per-hero ownership info so the picker
+    // always fills the grid and shows locks on unowned heroes.
+    const ownedByTpl = new Map();
+    owned.forEach((h) => {
+        const tplId = h.heroId || h.id;
+        if (tplId && !ownedByTpl.has(tplId)) ownedByTpl.set(tplId, h);
+    });
+    const list = catalog.map((tpl) => {
+        const ownedInst = ownedByTpl.get(tpl.id);
+        return {
+            id: ownedInst ? (ownedInst.instanceId || ownedInst.id || tpl.id) : tpl.id,
+            templateId: tpl.id,
+            image: (ownedInst && ownedInst.image) || tpl.image,
+            model: (ownedInst && ownedInst.model) || tpl.model || '',
+            name: tpl.name || { ru: 'Hero', ua: 'Hero' },
+            role: tpl.role || { ru: '', ua: '' },
+            rarityKey: tpl.rarityKey || 'common',
+            level: Number((ownedInst && ownedInst.level) || 1),
+            owned: !!ownedInst
+        };
+    });
+    return list;
+}
+
+function _resolveHomeHero(list) {
+    if (!list || list.length === 0) return null;
+    let savedId = '';
+    try { savedId = localStorage.getItem(HOME_HERO_STORAGE_KEY) || ''; } catch (_) {}
+    // Explicit "no hero on home" state
+    if (savedId === '__none__') return null;
+    if (savedId) {
+        const found = list.find((h) => h.id === savedId || h.templateId === savedId);
+        if (found && found.owned) return found;
+    }
+    // Fallback only among OWNED heroes
+    const ownedList = list.filter((h) => h.owned);
+    if (ownedList.length === 0) return null;
+    const fallback = ownedList.find((h) => h.templateId === HOME_FALLBACK_HERO_ID);
+    return fallback || ownedList[0];
+}
+
+function _localizeHomeHero(hero) {
+    if (!hero) return { name: '', role: '' };
+    const lang = getCurrentLanguage();
+    const pick = (val) => (val && typeof val === 'object') ? (val[lang] || val.ru || val.ua || '') : (val || '');
+    return { name: pick(hero.name), role: pick(hero.role) };
+}
+
+function getHomeHeroEconomy(activeHero) {
+    if (!activeHero) return null;
+    const purchasedHeroes = getPurchasedHeroes();
+    const matchedHero = purchasedHeroes.find((heroItem) => {
+        const instanceId = heroItem.instanceId || heroItem.id || '';
+        const templateId = heroItem.heroId || heroItem.templateId || heroItem.id || '';
+        return instanceId === activeHero.id || instanceId === activeHero.instanceId || templateId === activeHero.templateId || templateId === activeHero.id;
+    });
+    return enrichHeroWithEconomy(matchedHero || activeHero, purchasedHeroes);
+}
+
+function configureHeroModelViewer(viewer, hero, context = 'home') {
+    if (!viewer) return;
+    const templateId = hero?.templateId || hero?.heroId || hero?.id || '';
+    const isStarter = templateId === 'starter' || templateId === 'h0' || templateId === 'h_starter' || hero?.rarityKey === 'starter' || hero?.isTestHero;
+    const rotationSpeed = context === 'home' ? (isStarter ? '5deg' : '8deg') : '6deg';
+
+    viewer.setAttribute('auto-rotate', '');
+    viewer.setAttribute('auto-rotate-delay', '0');
+    viewer.setAttribute('rotation-per-second', rotationSpeed);
+    viewer.dataset.baseRotationSpeed = rotationSpeed;
+    viewer.removeAttribute('min-camera-orbit');
+    viewer.removeAttribute('max-camera-orbit');
+
+    if (context === 'home' && isStarter) {
+        viewer.setAttribute('camera-orbit', '0deg 78deg 7.2m');
+        viewer.setAttribute('field-of-view', '22deg');
+        viewer.setAttribute('min-field-of-view', '22deg');
+        viewer.setAttribute('max-field-of-view', '22deg');
+        viewer.setAttribute('camera-target', '0m 0.26m 0m');
+        viewer.setAttribute('exposure', '1.8');
+        viewer.dataset.heroModel = 'starter';
+        return;
+    }
+
+    if (context === 'showcase') {
+        viewer.setAttribute('camera-orbit', isStarter ? '0deg 78deg 7.4m' : '0deg 80deg 6.8m');
+        viewer.setAttribute('field-of-view', isStarter ? '23deg' : '24deg');
+        viewer.setAttribute('min-field-of-view', isStarter ? '23deg' : '24deg');
+        viewer.setAttribute('max-field-of-view', isStarter ? '23deg' : '24deg');
+        viewer.setAttribute('camera-target', isStarter ? '0m 0.24m 0m' : '0m 0.16m 0m');
+        viewer.setAttribute('exposure', '1.85');
+        viewer.dataset.heroModel = isStarter ? 'starter' : 'standard';
+        return;
+    }
+
+    viewer.setAttribute('camera-orbit', context === 'home' ? '16deg 80deg 5.4m' : '0deg 85deg 3.4m');
+    viewer.setAttribute('field-of-view', context === 'home' ? '26deg' : '30deg');
+    viewer.setAttribute('min-field-of-view', context === 'home' ? '26deg' : '30deg');
+    viewer.setAttribute('max-field-of-view', context === 'home' ? '26deg' : '30deg');
+    viewer.setAttribute('camera-target', context === 'home' ? '0m 0.12m 0m' : '0m 0.05m 0m');
+    viewer.setAttribute('exposure', context === 'home' ? '1.9' : '1.7');
+    viewer.dataset.heroModel = 'standard';
+}
+
+function getHeroModelViewerAttrs(context = 'card') {
+    const contextMap = {
+        card: { orbit: '0deg 85deg 3.4m', fov: '30deg', target: '0m 0.05m 0m', exposure: '1.7', speed: '6deg' },
+        picker: { orbit: '0deg 84deg 3.8m', fov: '28deg', target: '0m 0.08m 0m', exposure: '1.8', speed: '6deg' },
+        showcase: { orbit: '0deg 80deg 6.8m', fov: '24deg', target: '0m 0.16m 0m', exposure: '1.85', speed: '5deg' },
+        detail: { orbit: '16deg 80deg 4.8m', fov: '26deg', target: '0m 0.12m 0m', exposure: '1.9', speed: '5deg' },
+        farm: { orbit: '12deg 80deg 4.2m', fov: '25deg', target: '0m 0.14m 0m', exposure: '1.9', speed: '5deg' }
+    };
+    const cfg = contextMap[context] || contextMap.card;
+    return `interaction-prompt="none" disable-zoom disable-pan disable-tap auto-rotate auto-rotate-delay="0" rotation-per-second="${cfg.speed}" data-base-rotation-speed="${cfg.speed}" shadow-intensity="0.65" shadow-softness="1" exposure="${cfg.exposure}" tone-mapping="aces" environment-image="legacy" camera-orbit="${cfg.orbit}" field-of-view="${cfg.fov}" min-field-of-view="${cfg.fov}" max-field-of-view="${cfg.fov}" camera-target="${cfg.target}" loading="lazy" reveal="auto"`;
+}
+
+function renderHome() {
+    const section = document.getElementById('home-section');
+    if (!section) return;
+    if (!window.gameDB || !window.gameDB.data) return;
+
+    const user = window.gameDB.data.user || {};
+    const lang = getCurrentLanguage();
+    const isUa = lang === 'ua';
+    const locale = LANGUAGE_TO_LOCALE[lang] || 'ru-RU';
+    const t = getTranslations ? getTranslations() : {};
+
+    // ── Profile chip (top-left)
+    const initialsEl = document.getElementById('home-profile-initials');
+    const nameEl = document.getElementById('home-profile-name');
+    const lvlEl = document.getElementById('home-profile-lvl');
+    const avatarBox = document.getElementById('home-profile-avatar');
+    const username = user.username || user.firstName || 'RoboNexus';
+    if (nameEl) nameEl.textContent = username;
+    const lvlNumEl = document.getElementById('home-profile-lvl-num');
+    if (lvlNumEl) {
+        const lvl = (user.stats && Number(user.stats.level)) || 1;
+        lvlNumEl.textContent = String(lvl);
+    }
+    if (lvlEl) {
+        const lvl = (user.stats && Number(user.stats.level)) || 1;
+        lvlEl.textContent = `LVL ${lvl}`;
+    }
+    const onlineNumEl = document.getElementById('home-online-num');
+    if (onlineNumEl) {
+        const onlineSrc = document.getElementById('online-value');
+        const onlineVal = onlineSrc ? (onlineSrc.textContent || '0').replace(/\D/g, '') : '0';
+        onlineNumEl.textContent = onlineVal || '0';
+    }
+    if (initialsEl && typeof getInitials === 'function') {
+        initialsEl.textContent = getInitials(user.firstName || username, username);
+    }
+    if (avatarBox) {
+        const photoUrl = user.photoUrl || (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user && window.Telegram.WebApp.initDataUnsafe.user.photo_url) || '';
+        avatarBox.style.backgroundImage = photoUrl ? `url("${photoUrl}")` : '';
+        avatarBox.classList.toggle('has-photo', !!photoUrl);
+    }
+
+    // ── Balance pills + capsule
+    const ton = Number(user.balanceBuy || 0) + Number(user.balanceWithdraw || 0);
+    const rnx = Number(user.rnxBalance || 0);
+    const tonStr = `${ton.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const rnxStr = `${formatNumber(rnx, locale)}`;
+    setText('home-bal-ton-value', tonStr);
+    setText('home-bal-rnx-value', rnxStr);
+    setText('home-capsule-ton', `${tonStr} TON`);
+    setText('home-capsule-rnx', `~${rnxStr} $RNX`);
+
+    if (typeof countUp === 'function') {
+        countUp(document.getElementById('home-bal-ton-value'), ton, { decimals: 2, duration: 700, locale });
+        countUp(document.getElementById('home-bal-rnx-value'), rnx, { duration: 700, locale });
+    }
+
+    // ── Active hero
+    const heroList = _getHomeHeroList();
+    const hasOwnedHeroes = Array.isArray(user.heroes) && user.heroes.length > 0;
+    const active = _resolveHomeHero(heroList);
+    const heroImg = document.getElementById('home-hero-img');
+    const heroMv = document.getElementById('home-hero-mv');
+    const heroName = document.getElementById('home-hero-name');
+    const heroRole = document.getElementById('home-hero-role');
+    const stage = document.getElementById('home-stage');
+    const heroPlate = document.getElementById('home-hero-badge');
+    const pedestal = document.getElementById('home-hero-pedestal');
+    let heroCta = document.getElementById('home-hero-cta');
+    let activeEconomyHero = null;
+    let activeHeroName = '';
+
+    if (!active) {
+        // ── Two cases handled the same way: no heroes at all, OR user explicitly cleared selection.
+        if (heroMv) heroMv.hidden = true;
+        if (heroImg) heroImg.hidden = true;
+        if (pedestal) pedestal.style.display = 'none';
+        if (heroPlate) heroPlate.style.display = 'none';
+        // CTA shows ONLY when user has no heroes at all (shop button).
+        // If heroes exist but home is toggled off, show empty stage without any button.
+        if (!hasOwnedHeroes) {
+            if (!heroCta && stage) {
+                heroCta = document.createElement('button');
+                heroCta.id = 'home-hero-cta';
+                heroCta.type = 'button';
+                heroCta.className = 'home-hero-cta';
+                heroCta.innerHTML = `
+                    <span class="home-hero-cta-text" data-cta="label"></span>
+                    <svg class="home-hero-cta-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                `;
+                heroCta.addEventListener('click', () => {
+                    try { triggerHaptic && triggerHaptic('medium'); } catch (_) {}
+                    navigateTo('shop');
+                });
+                stage.appendChild(heroCta);
+            }
+            if (heroCta) {
+                const labelEl = heroCta.querySelector('[data-cta="label"]');
+                if (labelEl) {
+                    labelEl.textContent = isUa ? 'Отримати героя' : 'Получить героя';
+                }
+                heroCta.dataset.mode = 'shop';
+                heroCta.classList.remove('is-hidden');
+            }
+            // ── Empty-state info card (only when no heroes at all)
+            let emptyCard = document.getElementById('home-hero-empty-card');
+            if (!emptyCard && stage) {
+                emptyCard = document.createElement('div');
+                emptyCard.id = 'home-hero-empty-card';
+                emptyCard.className = 'home-hero-empty-card';
+                emptyCard.innerHTML = `
+                    <div class="home-hero-empty-glyph" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="12" rx="3"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><path d="M12 2v4"/><path d="M8 22h8"/></svg>
+                    </div>
+                    <div class="home-hero-empty-title" data-empty="title"></div>
+                    <div class="home-hero-empty-sub" data-empty="sub"></div>
+                    <ul class="home-hero-empty-perks" data-empty="perks">
+                        <li><span class="home-hero-empty-perk-ico">⚡</span><span data-empty="perk1"></span></li>
+                        <li><span class="home-hero-empty-perk-ico">★</span><span data-empty="perk2"></span></li>
+                        <li><span class="home-hero-empty-perk-ico">↑</span><span data-empty="perk3"></span></li>
+                    </ul>
+                `;
+                // Insert before CTA so CTA stays at the bottom
+                if (heroCta && heroCta.parentNode === stage) {
+                    stage.insertBefore(emptyCard, heroCta);
+                } else {
+                    stage.appendChild(emptyCard);
+                }
+            }
+            if (emptyCard) {
+                const t = emptyCard.querySelector('[data-empty="title"]');
+                const s = emptyCard.querySelector('[data-empty="sub"]');
+                const p1 = emptyCard.querySelector('[data-empty="perk1"]');
+                const p2 = emptyCard.querySelector('[data-empty="perk2"]');
+                const p3 = emptyCard.querySelector('[data-empty="perk3"]');
+                if (t) t.textContent = isUa ? 'Героя ще немає' : 'Героя пока нет';
+                if (s) s.textContent = isUa
+                    ? 'Активуй першого бота — він майнить $RNX щохвилини'
+                    : 'Активируй первого бота — он майнит $RNX каждую минуту';
+                if (p1) p1.textContent = isUa ? 'Пасивний дохід 24/7' : 'Пассивный доход 24/7';
+                if (p2) p2.textContent = isUa ? 'Щоденні бонуси та квести' : 'Ежедневные бонусы и квесты';
+                if (p3) p3.textContent = isUa ? 'Прокачка та рідкісні дропи' : 'Прокачка и редкие дропы';
+            }
+        } else if (heroCta) {
+            heroCta.remove();
+            heroCta = null;
+            const emptyCard = document.getElementById('home-hero-empty-card');
+            if (emptyCard) emptyCard.remove();
+        }
+        if (stage) stage.dataset.rarity = 'empty';
+    } else {
+        // ── Has active hero: remove CTA, show active model/image
+        if (heroCta) {
+            heroCta.remove();
+            heroCta = null;
+        }
+        const _emptyCardActive = document.getElementById('home-hero-empty-card');
+        if (_emptyCardActive) _emptyCardActive.remove();
+        if (pedestal) pedestal.style.display = '';
+        if (heroPlate) heroPlate.style.display = '';
+        // Hero may have an explicit `model` (.glb) field
+        const modelUrl = active.model || '';
+        if (heroMv && heroImg) {
+            if (modelUrl) {
+                if (heroMv.getAttribute('src') !== modelUrl) heroMv.setAttribute('src', modelUrl);
+                configureHeroModelViewer(heroMv, active, 'home');
+                heroMv.hidden = false;
+                heroImg.hidden = true;
+            } else {
+                heroMv.hidden = true;
+                heroImg.hidden = false;
+                if (heroImg.getAttribute('src') !== active.image) heroImg.src = active.image;
+            }
+        } else if (heroImg) {
+            if (heroImg.getAttribute('src') !== active.image) heroImg.src = active.image;
+        }
+        const loc = _localizeHomeHero(active);
+        const economyHero = getHomeHeroEconomy(active);
+        activeEconomyHero = economyHero;
+        activeHeroName = loc.name || active.name || 'Hero';
+        const profitText = economyHero ? formatHeroDailyProfit(economyHero, locale) : '0 RNX';
+        if (heroName) heroName.textContent = loc.name;
+        if (heroRole) {
+            heroRole.classList.add('home-hero-profit');
+            heroRole.innerHTML = `<span>${isUa ? 'Дохід / день' : 'Доход / день'}</span><strong>${profitText}</strong><i>+RNX</i>`;
+        }
+        if (stage) stage.dataset.rarity = active.rarityKey || 'common';
+    }
+
+    // ── Tile values
+    if (typeof getDailyStreakState === 'function') {
+        try { setText('home-tile-streak-val', String(Math.max(0, getDailyStreakState().count || 0))); } catch (_) {}
+    }
+    const heroesCount = Array.isArray(user.heroes) ? user.heroes.length : 0;
+    setText('home-tile-heroes-val', String(heroesCount));
+    let tasksCount = 0;
+    try {
+        if (window.gameDB && typeof window.gameDB.getTasks === 'function') {
+            tasksCount = (window.gameDB.getTasks() || []).filter((task) => task.status === 'active').length;
+        }
+    } catch (_) {}
+    setText('home-tile-tasks-val', String(tasksCount));
+
+    renderHomeDailyPlan({
+        activeHero: active,
+        activeHeroName,
+        activeEconomyHero,
+        hasOwnedHeroes,
+        heroesCount,
+        tasksCount,
+        isUa,
+        locale
+    });
+
+    // ── Localize labels
+    const trMap = isUa
+        ? { rating: 'ТОП', history: 'ІСТОРІЯ', promo: 'ПРОМО', friends: 'ДРУЗІ', swap: 'Змінити',
+            dailyBonus: 'ЩОДЕННИЙ БОНУС', tasks: 'Завдання', shop: 'Магазин', myHeroes: 'Герої', more: 'Ще',
+            shopOpen: '→', pickHero: 'Оберіть героя', pickHeroHint: 'Цей герой буде на головному екрані' }
+        : { rating: 'ТОП', history: 'ИСТОРИЯ', promo: 'ПРОМО', friends: 'ДРУЗЬЯ', swap: 'Сменить',
+            dailyBonus: 'ЕЖЕДНЕВНЫЙ БОНУС', tasks: 'Задания', shop: 'Магазин', myHeroes: 'Герои', more: 'Ещё',
+            shopOpen: '→', pickHero: 'Выберите героя', pickHeroHint: 'Этот герой будет на главном экране' };
+    section.querySelectorAll('[data-home-tr]').forEach((el) => {
+        const k = el.getAttribute('data-home-tr');
+        if (trMap[k] != null) el.innerHTML = trMap[k];
+    });
+    renderNotificationsCenter();
+    maybeShowFirstRunOnboarding();
+
+    // ── One-time interactions binding
+    if (!section.dataset.homeBound) {
+        section.dataset.homeBound = '1';
+
+        const profileChip = document.getElementById('home-profile-chip');
+        if (profileChip) profileChip.addEventListener('click', () => {
+            try { triggerHaptic && triggerHaptic('light'); } catch (_) {}
+            navigateTo('profile');
+        });
+        section.querySelectorAll('[data-home-action]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const action = btn.getAttribute('data-home-action');
+                try { triggerHaptic && triggerHaptic('light'); } catch (_) {}
+                if (action === 'rating')   { navigateTo('rating'); return; }
+                if (action === 'history')  { navigateTo('history'); return; }
+                if (action === 'promo')    {
+                    if (typeof openPromoModal === 'function') { openPromoModal(); return; }
+                    navigateTo('menu'); return;
+                }
+                if (action === 'referral') { navigateTo('referral'); return; }
+                if (action === 'tasks')    { navigateTo('tasks'); return; }
+                if (action === 'shop')     { navigateTo('shop'); return; }
+                if (action === 'mines')    { navigateTo('mines'); return; }
+                if (action === 'menu')     { navigateTo('menu'); return; }
+                if (action === 'balance-ton' || action === 'balance-rnx') {
+                    navigateTo('profile');
+                    setTimeout(() => {
+                        const card = document.querySelector('.prf-balance-flow') || document.querySelector('.prf-hero-card');
+                        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }, 250);
+                    return;
+                }
+                if (action === 'streak')   {
+                    navigateTo('profile');
+                    setTimeout(() => {
+                        const s = document.getElementById('prf-daily-streak');
+                        if (s) s.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 250);
+                    return;
+                }
+            });
+        });
+
+        // Hero on home is no longer clickable — selection is done from "My Heroes".
+        const pedestal = document.getElementById('home-hero-pedestal');
+        if (pedestal) {
+            pedestal.style.cursor = 'default';
+            pedestal.style.pointerEvents = 'none';
+        }
+
+        const pickerBack = document.getElementById('home-picker-back');
+        const pickerClose = document.getElementById('home-picker-close');
+        if (pickerBack) pickerBack.addEventListener('click', closeHomeHeroPicker);
+        if (pickerClose) pickerClose.addEventListener('click', closeHomeHeroPicker);
+    }
+}
+
+function maybeShowFirstRunOnboarding() {
+    let completed = false;
+    try { completed = localStorage.getItem('rnxOnboardingDone') === '1'; } catch (_) {}
+    if (completed || document.body.dataset.onboardingShown === '1') return;
+    document.body.dataset.onboardingShown = '1';
+    document.body.dataset.firstRunLanguage = 'ru';
+    setTimeout(() => renderApp(), 0);
+    renderFirstRunOnboarding();
+}
+
+function _getOnboardingSteps(isUa) {
+    // Each step optionally targets a real on-screen element via `target` selector.
+    // If `nav` is set, the app navigates to that section before the step shows.
+    // `placement` hint: 'top' | 'bottom' | 'left' | 'right' | 'center'.
+    return isUa
+        ? [
+            { icon: '👋', kicker: 'ЛАСКАВО ПРОСИМО', title: 'Знайомство з RoboNexus', text: 'Швидкий тур інтерфейсом — покажемо ключові кнопки прямо на екрані. Можна перемкнути мову нижче.', point: 'Старт', placement: 'center', showLang: true },
+            { icon: '🤖', kicker: 'КРОК 1', title: 'Ваш головний герой', text: 'У центрі — активний бот. Він майнить $RNX і показує добовий прибуток. Натисніть, щоб обрати іншого.', point: 'Герой', target: '#home-stage', placement: 'bottom', nav: 'home' },
+            { icon: '💰', kicker: 'КРОК 2', title: 'Баланс TON та $RNX', text: 'Тут зібрано основні валюти. Натисніть «+» щоб поповнити TON або обміняти $RNX.', point: 'Баланс', target: '.home-bal-row', placement: 'bottom', nav: 'home' },
+            { icon: '🛒', kicker: 'КРОК 3', title: 'Магазин героїв', text: 'У магазині купують нових ботів — більше героїв означає більший пасивний дохід.', point: 'Магазин', target: '[data-nav="shop"]', placement: 'top', nav: 'home' },
+            { icon: '⚡', kicker: 'КРОК 4', title: 'Мої герої та ферма', text: 'Колекція, бонуси, цикл нарахування і лідери ферми — все тут.', point: 'Ферма', target: '[data-nav="mines"]', placement: 'top', nav: 'home' },
+            { icon: '📊', kicker: 'КРОК 5', title: 'Жива статистика', text: 'Пульс проекту: користувачі, оборот, заявки. Оновлюється в реальному часі.', point: 'Статистика', target: '[data-nav="stats"]', placement: 'top', nav: 'home' },
+            { icon: '🚀', kicker: 'ФІНАЛ', title: 'Все готово!', text: 'Завдання, повідомлення та друзі — все в один дотик з головного екрана. Успіхів!', point: 'Готово', placement: 'center' }
+        ]
+        : [
+            { icon: '👋', kicker: 'ДОБРО ПОЖАЛОВАТЬ', title: 'Знакомство с RoboNexus', text: 'Короткий тур по интерфейсу — покажем ключевые кнопки прямо на экране. Язык можно поменять ниже.', point: 'Старт', placement: 'center', showLang: true },
+            { icon: '🤖', kicker: 'ШАГ 1', title: 'Ваш главный герой', text: 'В центре — активный бот. Он майнит $RNX и показывает суточный доход. Нажмите, чтобы выбрать другого.', point: 'Герой', target: '#home-stage', placement: 'bottom', nav: 'home' },
+            { icon: '💰', kicker: 'ШАГ 2', title: 'Баланс TON и $RNX', text: 'Здесь основные валюты. Жмите «+», чтобы пополнить TON или обменять $RNX.', point: 'Баланс', target: '.home-bal-row', placement: 'bottom', nav: 'home' },
+            { icon: '🛒', kicker: 'ШАГ 3', title: 'Магазин героев', text: 'В магазине покупают новых ботов — больше героев = больше пассивного дохода.', point: 'Магазин', target: '[data-nav="shop"]', placement: 'top', nav: 'home' },
+            { icon: '⚡', kicker: 'ШАГ 4', title: 'Мои герои и ферма', text: 'Коллекция, бонусы, цикл начислений и лидеры фермы — всё здесь.', point: 'Ферма', target: '[data-nav="mines"]', placement: 'top', nav: 'home' },
+            { icon: '📊', kicker: 'ШАГ 5', title: 'Живая статистика', text: 'Пульс проекта: пользователи, оборот, заявки. Обновляется в реальном времени.', point: 'Статистика', target: '[data-nav="stats"]', placement: 'top', nav: 'home' },
+            { icon: '🚀', kicker: 'ФИНАЛ', title: 'Всё готово!', text: 'Задания, уведомления и друзья — всё в одно касание с главного экрана. Удачи!', point: 'Готово', placement: 'center' }
+        ];
+}
+
+function _onboardingKeyHandler(event) {
+    const overlay = document.getElementById('first-run-onboarding');
+    if (!overlay) return;
+    if (event.key === 'Escape') { event.preventDefault(); completeFirstRunOnboarding(); return; }
+    if (event.key === 'Enter' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        document.getElementById('onboarding-next')?.click();
+        return;
+    }
+    if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        const back = document.getElementById('onboarding-back');
+        if (back && !back.hasAttribute('hidden')) back.click();
+    }
+}
+
+let _onboardingResizeRaf = 0;
+function _onboardingResizeHandler() {
+    if (_onboardingResizeRaf) return;
+    _onboardingResizeRaf = requestAnimationFrame(() => {
+        _onboardingResizeRaf = 0;
+        _positionOnboardingSpotlight();
+    });
+}
+
+function _clearOnboardingTargetHighlight() {
+    document.querySelectorAll('[data-onboarding-active]').forEach((el) => {
+        el.removeAttribute('data-onboarding-active');
+        if (el.dataset.onboardingPrevPos !== undefined) {
+            el.style.position = el.dataset.onboardingPrevPos || '';
+            delete el.dataset.onboardingPrevPos;
+        }
+    });
+}
+
+function _positionOnboardingSpotlight() {
+    const overlay = document.getElementById('first-run-onboarding');
+    if (!overlay) return;
+    const targetSelector = overlay.dataset.target || '';
+    const placement = overlay.dataset.placement || 'center';
+    const spotlight = overlay.querySelector('.onboarding-spotlight');
+    const card = overlay.querySelector('.onboarding-card');
+    const pointer = overlay.querySelector('.onboarding-pointer');
+    if (!spotlight || !card) return;
+
+    const targetEl = targetSelector ? document.querySelector(targetSelector) : null;
+
+    // Clear previous highlight, then re-apply on the new target
+    _clearOnboardingTargetHighlight();
+
+    if (!targetEl || placement === 'center') {
+        overlay.classList.add('is-centered');
+        spotlight.style.opacity = '0';
+        if (pointer) pointer.style.opacity = '0';
+        // Center the card
+        card.style.left = '';
+        card.style.top = '';
+        card.style.right = '';
+        card.style.bottom = '';
+        return;
+    }
+
+    overlay.classList.remove('is-centered');
+    const rect = targetEl.getBoundingClientRect();
+    const padding = 10;
+    const x = Math.max(8, rect.left - padding);
+    const y = Math.max(8, rect.top - padding);
+    const w = rect.width + padding * 2;
+    const h = rect.height + padding * 2;
+
+    // Lift the target above the dimming backdrop so it stays visible & clickable
+    targetEl.setAttribute('data-onboarding-active', '1');
+    if (targetEl.dataset.onboardingPrevPos === undefined) {
+        targetEl.dataset.onboardingPrevPos = targetEl.style.position || '';
+    }
+    const computedPos = getComputedStyle(targetEl).position;
+    if (computedPos === 'static') targetEl.style.position = 'relative';
+
+    spotlight.style.opacity = '1';
+    spotlight.style.left = `${x}px`;
+    spotlight.style.top = `${y}px`;
+    spotlight.style.width = `${w}px`;
+    spotlight.style.height = `${h}px`;
+
+    // Position card based on placement
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const cardW = Math.min(360, vw - 24);
+    card.style.width = `${cardW}px`;
+    // Measure after width set
+    const cardH = card.offsetHeight || 240;
+
+    let cardLeft, cardTop;
+    const gap = 18;
+
+    let effectivePlacement = placement;
+    if (placement === 'bottom' && rect.bottom + gap + cardH > vh - 12) effectivePlacement = 'top';
+    if (placement === 'top' && rect.top - gap - cardH < 12) effectivePlacement = 'bottom';
+
+    if (effectivePlacement === 'bottom') {
+        cardTop = rect.bottom + gap;
+        cardLeft = Math.min(Math.max(12, rect.left + rect.width / 2 - cardW / 2), vw - cardW - 12);
+    } else if (effectivePlacement === 'top') {
+        cardTop = rect.top - gap - cardH;
+        cardLeft = Math.min(Math.max(12, rect.left + rect.width / 2 - cardW / 2), vw - cardW - 12);
+    } else if (effectivePlacement === 'right') {
+        cardLeft = rect.right + gap;
+        cardTop = Math.min(Math.max(12, rect.top + rect.height / 2 - cardH / 2), vh - cardH - 12);
+    } else {
+        cardLeft = rect.left - gap - cardW;
+        cardTop = Math.min(Math.max(12, rect.top + rect.height / 2 - cardH / 2), vh - cardH - 12);
+    }
+    cardTop = Math.min(Math.max(12, cardTop), vh - cardH - 12);
+
+    card.style.left = `${cardLeft}px`;
+    card.style.top = `${cardTop}px`;
+    card.style.right = 'auto';
+    card.style.bottom = 'auto';
+    card.dataset.placement = effectivePlacement;
+
+    if (pointer) {
+        pointer.style.opacity = '1';
+        pointer.dataset.placement = effectivePlacement;
+        // Pointer anchors to spotlight edge
+        const targetCx = rect.left + rect.width / 2;
+        const targetCy = rect.top + rect.height / 2;
+        if (effectivePlacement === 'bottom' || effectivePlacement === 'top') {
+            const pointerLeft = Math.min(Math.max(cardLeft + 20, targetCx - 7), cardLeft + cardW - 28);
+            pointer.style.left = `${pointerLeft}px`;
+            pointer.style.top = effectivePlacement === 'bottom' ? `${rect.bottom + padding + 2}px` : `${rect.top - padding - 14}px`;
+        } else {
+            const pointerTop = Math.min(Math.max(cardTop + 20, targetCy - 7), cardTop + cardH - 28);
+            pointer.style.top = `${pointerTop}px`;
+            pointer.style.left = effectivePlacement === 'right' ? `${rect.right + padding + 2}px` : `${rect.left - padding - 14}px`;
+        }
+    }
+}
+
+function renderFirstRunOnboarding() {
+    const isUa = getCurrentLanguage() === 'ua';
+    let overlay = document.getElementById('first-run-onboarding');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'first-run-onboarding';
+        overlay.className = 'first-run-onboarding is-centered';
+        overlay.innerHTML = `
+            <div class="onboarding-backdrop" aria-hidden="true"></div>
+            <div class="onboarding-spotlight" aria-hidden="true"></div>
+            <div class="onboarding-pointer" aria-hidden="true"></div>
+            <div class="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+                <button class="onboarding-close" id="onboarding-skip" type="button" aria-label="Skip">×</button>
+                <div class="onboarding-progress" aria-hidden="true"><div class="onboarding-progress-fill" id="onboarding-progress-fill"></div></div>
+                <div class="onboarding-card-body">
+                    <div class="onboarding-meta">
+                        <div class="onboarding-icon-badge" id="onboarding-icon">✨</div>
+                        <div class="onboarding-meta-text">
+                            <div class="onboarding-kicker" id="onboarding-kicker"></div>
+                            <div class="onboarding-counter" id="onboarding-counter"></div>
+                        </div>
+                    </div>
+                    <div class="onboarding-copy" id="onboarding-copy">
+                        <h2 class="onboarding-title" id="onboarding-title"></h2>
+                        <p class="onboarding-text" id="onboarding-text"></p>
+                    </div>
+                    <div class="onboarding-language" id="onboarding-language" aria-label="Language" hidden>
+                        <button class="onboarding-lang-btn" type="button" data-onboarding-lang="ru">RU</button>
+                        <button class="onboarding-lang-btn" type="button" data-onboarding-lang="ua">UA</button>
+                    </div>
+                    <div class="onboarding-steps" id="onboarding-steps"></div>
+                    <div class="onboarding-actions">
+                        <button class="onboarding-back" type="button" id="onboarding-back" aria-label="Back" hidden>‹</button>
+                        <button class="onboarding-next" type="button" id="onboarding-next"></button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', (event) => {
+            if (event.target.classList.contains('onboarding-backdrop')) {
+                // tap on dimmed area dismisses focus but does not close
+                try { triggerHaptic && triggerHaptic('light'); } catch (_) {}
+            }
+        });
+        overlay.querySelectorAll('[data-onboarding-lang]').forEach((button) => {
+            button.addEventListener('click', () => {
+                const language = button.dataset.onboardingLang;
+                if (!LOCALES[language] || !window.gameDB) return;
+                document.body.dataset.firstRunLanguage = language;
+                window.gameDB.updateSettings({ language });
+                const currentUser = window.gameDB.getUser();
+                if (currentUser && currentUser.id) window.gameDB.updateUserById(currentUser.id, { lang: language });
+                try { triggerHaptic && triggerHaptic('light'); } catch (_) {}
+                renderApp();
+                renderFirstRunOnboarding();
+            });
+        });
+        document.addEventListener('keydown', _onboardingKeyHandler);
+        window.addEventListener('resize', _onboardingResizeHandler);
+        window.addEventListener('scroll', _onboardingResizeHandler, true);
+    }
+
+    const steps = _getOnboardingSteps(isUa);
+    const total = steps.length;
+    const currentStep = Math.max(0, Math.min(Number(overlay.dataset.step || 0), total - 1));
+    const step = steps[currentStep];
+    const isFinal = currentStep >= total - 1;
+    const isFirst = currentStep === 0;
+
+    overlay.dataset.step = String(currentStep);
+    overlay.dataset.target = step.target || '';
+    overlay.dataset.placement = step.placement || 'center';
+    overlay.classList.toggle('is-final', isFinal);
+    overlay.classList.toggle('is-first', isFirst);
+    overlay.classList.toggle('has-target', !!step.target);
+
+    // Navigate to required section before showing
+    if (step.nav && typeof navigateTo === 'function') {
+        try { navigateTo(step.nav); } catch (_) {}
+    }
+
+    // Smooth content swap
+    const copy = document.getElementById('onboarding-copy');
+    if (copy) {
+        copy.classList.remove('is-stepping');
+        void copy.offsetWidth;
+        copy.classList.add('is-stepping');
+    }
+
+    setText('onboarding-kicker', step.kicker);
+    setText('onboarding-title', step.title);
+    setText('onboarding-text', step.text);
+    setText('onboarding-counter', `${currentStep + 1} / ${total}`);
+    const iconEl = document.getElementById('onboarding-icon');
+    if (iconEl) iconEl.textContent = step.icon || '✨';
+
+    const fill = document.getElementById('onboarding-progress-fill');
+    if (fill) fill.style.width = `${((currentStep + 1) / total) * 100}%`;
+
+    const langBlock = document.getElementById('onboarding-language');
+    if (langBlock) langBlock.hidden = !step.showLang;
+
+    const stepsEl = document.getElementById('onboarding-steps');
+    if (stepsEl) {
+        stepsEl.innerHTML = steps.map((item, index) => {
+            const state = index < currentStep ? ' is-done' : (index === currentStep ? ' is-active' : '');
+            return `<button type="button" class="onboarding-step-dot${state}" data-step-index="${index}" aria-label="${item.point}"></button>`;
+        }).join('');
+        stepsEl.querySelectorAll('[data-step-index]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const idx = Number(btn.dataset.stepIndex);
+                if (Number.isNaN(idx) || idx > currentStep) return;
+                overlay.dataset.step = String(idx);
+                try { triggerHaptic && triggerHaptic('light'); } catch (_) {}
+                renderFirstRunOnboarding();
+            });
+        });
+    }
+
+    overlay.querySelectorAll('[data-onboarding-lang]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.onboardingLang === getCurrentLanguage());
+    });
+
+    const skipButton = document.getElementById('onboarding-skip');
+    if (skipButton) {
+        skipButton.setAttribute('aria-label', isUa ? 'Пропустити' : 'Пропустить');
+        skipButton.title = isUa ? 'Пропустити' : 'Пропустить';
+        skipButton.onclick = () => {
+            try { triggerHaptic && triggerHaptic('light'); } catch (_) {}
+            completeFirstRunOnboarding();
+        };
+    }
+
+    const backButton = document.getElementById('onboarding-back');
+    if (backButton) {
+        if (isFirst) backButton.setAttribute('hidden', '');
+        else backButton.removeAttribute('hidden');
+        backButton.onclick = () => {
+            if (currentStep <= 0) return;
+            overlay.dataset.step = String(currentStep - 1);
+            try { triggerHaptic && triggerHaptic('light'); } catch (_) {}
+            renderFirstRunOnboarding();
+        };
+    }
+
+    const nextButton = document.getElementById('onboarding-next');
+    if (nextButton) {
+        nextButton.textContent = isFinal ? (isUa ? 'Почати' : 'Начать') : (isUa ? 'Далі' : 'Дальше');
+        nextButton.onclick = () => {
+            try { triggerHaptic && triggerHaptic(isFinal ? 'success' : 'light'); } catch (_) {}
+            if (isFinal) { completeFirstRunOnboarding(); return; }
+            overlay.dataset.step = String(currentStep + 1);
+            renderFirstRunOnboarding();
+        };
+        try { nextButton.focus({ preventScroll: true }); } catch (_) {}
+    }
+
+    // Position spotlight + card after DOM settles (and after any nav animation)
+    requestAnimationFrame(() => {
+        _positionOnboardingSpotlight();
+        // Some sections animate in; reposition once more shortly after
+        setTimeout(_positionOnboardingSpotlight, 180);
+    });
+}
+
+// Helper for testing the onboarding flow: window.replayOnboarding()
+window.replayOnboarding = function replayOnboarding() {
+    try { localStorage.removeItem('rnxOnboardingDone'); } catch (_) {}
+    delete document.body.dataset.onboardingShown;
+    const existing = document.getElementById('first-run-onboarding');
+    if (existing) existing.remove();
+    maybeShowFirstRunOnboarding();
+};
+
+function completeFirstRunOnboarding() {
+    const selectedLanguage = document.body.dataset.firstRunLanguage || getCurrentLanguage() || 'ru';
+    if (window.gameDB && LOCALES[selectedLanguage]) {
+        window.gameDB.updateSettings({ language: selectedLanguage });
+    }
+    try { localStorage.setItem('rnxOnboardingDone', '1'); } catch (_) {}
+    delete document.body.dataset.firstRunLanguage;
+    document.removeEventListener('keydown', _onboardingKeyHandler);
+    window.removeEventListener('resize', _onboardingResizeHandler);
+    window.removeEventListener('scroll', _onboardingResizeHandler, true);
+    _clearOnboardingTargetHighlight();
+    const overlay = document.getElementById('first-run-onboarding');
+    if (overlay) overlay.classList.add('is-leaving');
+    setTimeout(() => overlay?.remove(), 260);
+}
+
+function openHomeHeroPicker() {
+    const picker = document.getElementById('home-picker');
+    const grid = document.getElementById('home-picker-grid');
+    if (!picker || !grid) return;
+    // Portal picker to <body> so position:fixed isn't trapped by transformed ancestors
+    if (picker.parentElement !== document.body) {
+        document.body.appendChild(picker);
+    }
+    const list = _getHomeHeroList();
+    let savedId = '';
+    try { savedId = localStorage.getItem(HOME_HERO_STORAGE_KEY) || ''; } catch (_) {}
+    grid.innerHTML = list.map((h) => {
+        const loc = _localizeHomeHero(h);
+        const isActive = (h.id === savedId || h.templateId === savedId) ? ' is-active' : '';
+        const lockBadge = h.owned ? '' : '<span class="hp-card-lock">🔒</span>';
+        const visual = h.model
+            ? `<model-viewer
+                    class="hp-card-mv"
+                    src="${h.model}"
+                    alt="${loc.name}"
+                    ${getHeroModelViewerAttrs('picker')}
+                ></model-viewer>`
+            : `<img class="hp-card-img" src="${h.image}" alt="" loading="lazy" decoding="async">`;
+        return `
+            <button class="hp-card${isActive} rar-${h.rarityKey || 'common'}${h.model ? ' has-3d' : ''}" type="button" data-hero-id="${h.id}" data-hero-tpl="${h.templateId}" ${h.owned ? '' : 'data-locked="1"'}>
+                <div class="hp-card-img-wrap">
+                    ${visual}
+                    ${lockBadge}
+                </div>
+                <span class="hp-card-name">${loc.name}</span>
+                <span class="hp-card-role">${loc.role}</span>
+            </button>
+        `;
+    }).join('');
+    grid.querySelectorAll('.hp-card').forEach((card) => {
+        card.addEventListener('click', () => {
+            if (card.dataset.locked === '1') {
+                try { triggerHaptic && triggerHaptic('error'); } catch (_) {}
+                if (typeof showNotification === 'function') {
+                    showNotification(getCurrentLanguage() === 'ua'
+                        ? 'Цей герой ще не у вашій колекції'
+                        : 'Этот герой пока не в вашей коллекции', 'info');
+                }
+                return;
+            }
+            try { triggerHaptic && triggerHaptic('success'); } catch (_) {}
+            const id = card.getAttribute('data-hero-id') || card.getAttribute('data-hero-tpl');
+            try { localStorage.setItem(HOME_HERO_STORAGE_KEY, id); } catch (_) {}
+            closeHomeHeroPicker();
+            renderHome();
+        });
+    });
+    picker.classList.remove('hidden');
+    picker.setAttribute('aria-hidden', 'false');
+}
+
+function closeHomeHeroPicker() {
+    const picker = document.getElementById('home-picker');
+    if (!picker) return;
+    picker.classList.add('hidden');
+    picker.setAttribute('aria-hidden', 'true');
 }
 
 function renderStatisticsSection() {
@@ -5846,8 +7846,7 @@ function renderStatisticsSection() {
         if (historyBtn && !historyBtn.dataset.bound) {
             historyBtn.dataset.bound = '1';
             historyBtn.addEventListener('click', () => {
-                setActiveNavButton('menu');
-                handleNavigation('history');
+                navigateTo('history');
             });
         }
     }
@@ -6057,8 +8056,7 @@ function renderStatisticsSection() {
     if (viewAllBtn && !viewAllBtn.dataset.bound) {
         viewAllBtn.dataset.bound = '1';
         viewAllBtn.addEventListener('click', () => {
-            setActiveNavButton('menu');
-            handleNavigation('history');
+            navigateTo('history');
         });
     }
 }
@@ -6081,6 +8079,11 @@ function shortenLargeNumber(n) {
 function animateCountUp(el, target, fmt, duration) {
     if (!el) return;
     duration = duration || 900;
+    if (isPerfReducedMode() || document.visibilityState !== 'visible') {
+        const result = fmt(target);
+        if (typeof result === 'string') el.textContent = result;
+        return;
+    }
     const start = performance.now();
     const from = 0;
     function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
@@ -6457,6 +8460,10 @@ function showNotification(message, type = 'info', options = {}) {
 }
 
 function getCurrentLanguage() {
+    let onboardingDone = false;
+    try { onboardingDone = localStorage.getItem('rnxOnboardingDone') === '1'; } catch (_) {}
+    const firstRunLanguage = document.body?.dataset?.firstRunLanguage || '';
+    if (!onboardingDone && LOCALES[firstRunLanguage]) return firstRunLanguage;
     const settings = window.gameDB ? window.gameDB.getSettings() : { language: 'ru' };
     return LOCALES[settings.language] ? settings.language : 'ru';
 }
@@ -6475,7 +8482,202 @@ function triggerHaptic(level) {
     ) {
         window.Telegram.WebApp.HapticFeedback.impactOccurred(level);
     }
+    // Pair haptics with synthesized SFX when enabled
+    try { window.SFX && window.SFX.play(level); } catch (_) {}
 }
+
+/* ── SFX engine — synthesized via WebAudio, no asset files ── */
+(function initSfxEngine() {
+    'use strict';
+    const KEY = 'rnxSfxEnabled';
+    let ctx = null;
+    let enabled = (function() {
+        try {
+            const stored = localStorage.getItem(KEY);
+            return stored === null ? true : stored === '1';
+        } catch (_) { return true; }
+    })();
+
+    function ensureCtx() {
+        if (!enabled) return null;
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return null;
+        if (!ctx) ctx = new AC();
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+        return ctx;
+    }
+
+    function tone({ freq = 440, type = 'sine', dur = 0.08, gain = 0.06, freqEnd = null, delay = 0 }) {
+        const c = ensureCtx();
+        if (!c) return;
+        const t0 = c.currentTime + delay;
+        const osc = c.createOscillator();
+        const g = c.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, t0);
+        if (freqEnd != null) osc.frequency.exponentialRampToValueAtTime(Math.max(1, freqEnd), t0 + dur);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(gain, t0 + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        osc.connect(g).connect(c.destination);
+        osc.start(t0);
+        osc.stop(t0 + dur + 0.02);
+    }
+
+    const presets = {
+        light:   () => tone({ freq: 720, type: 'triangle', dur: 0.05, gain: 0.04 }),
+        medium:  () => { tone({ freq: 660, type: 'triangle', dur: 0.07, gain: 0.05 }); tone({ freq: 990, type: 'sine', dur: 0.07, gain: 0.04, delay: 0.04 }); },
+        heavy:   () => { tone({ freq: 220, type: 'sawtooth', dur: 0.10, gain: 0.06, freqEnd: 110 }); },
+        success: () => { tone({ freq: 660, type: 'triangle', dur: 0.09, gain: 0.05 }); tone({ freq: 990, type: 'triangle', dur: 0.11, gain: 0.05, delay: 0.08 }); },
+        error:   () => { tone({ freq: 360, type: 'square', dur: 0.10, gain: 0.05, freqEnd: 200 }); },
+        coin:    () => { tone({ freq: 1320, type: 'triangle', dur: 0.06, gain: 0.045 }); tone({ freq: 1760, type: 'triangle', dur: 0.10, gain: 0.045, delay: 0.05 }); }
+    };
+
+    function play(name) {
+        if (!enabled) return;
+        const fn = presets[name];
+        if (fn) fn();
+    }
+
+    function setEnabled(next) {
+        enabled = !!next;
+        try { localStorage.setItem(KEY, enabled ? '1' : '0'); } catch (_) {}
+        applyToggleUi();
+        if (enabled) play('light');
+    }
+
+    function applyToggleUi() {
+        const btn = document.getElementById('sfx-toggle-btn');
+        if (!btn) return;
+        btn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        btn.classList.toggle('is-off', !enabled);
+        const on = btn.querySelector('.sfx-icon-on');
+        const off = btn.querySelector('.sfx-icon-off');
+        if (on)  on.classList.toggle('hidden', !enabled);
+        if (off) off.classList.toggle('hidden',  enabled);
+    }
+
+    function bindToggle() {
+        const btn = document.getElementById('sfx-toggle-btn');
+        if (!btn || btn.dataset.bound === '1') return;
+        btn.dataset.bound = '1';
+        btn.addEventListener('click', () => setEnabled(!enabled));
+        applyToggleUi();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bindToggle);
+    } else {
+        bindToggle();
+    }
+
+    window.SFX = { play, setEnabled, get enabled() { return enabled; } };
+})();
+
+/* ── Time-of-day palette — adds .tod-{morning,day,evening,night} on <html> ── */
+(function initTimeOfDayPalette() {
+    'use strict';
+    function bucket(h) {
+        if (h < 6)  return 'night';
+        if (h < 11) return 'morning';
+        if (h < 17) return 'day';
+        if (h < 22) return 'evening';
+        return 'night';
+    }
+    function apply() {
+        const h = new Date().getHours();
+        const tod = bucket(h);
+        const html = document.documentElement;
+        ['tod-morning','tod-day','tod-evening','tod-night'].forEach((c) => {
+            if (c !== 'tod-' + tod) html.classList.remove(c);
+        });
+        html.classList.add('tod-' + tod);
+    }
+    apply();
+    // Re-evaluate every 15 min in case the app stays open across boundaries
+    setInterval(apply, 15 * 60 * 1000);
+})();
+
+/* ── Ambient orbs parallax — pointer (desktop) + gyro (iOS only after permission) ── */
+(function initAmbientParallax() {
+    'use strict';
+    const html = document.documentElement;
+    if (html.classList.contains('low-fx') || html.classList.contains('android-fx')) return;
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) return;
+
+    const orbs = [
+        { el: null, sel: '.ambient-orb-a', f: 1.0 },
+        { el: null, sel: '.ambient-orb-b', f: 0.6 },
+        { el: null, sel: '.ambient-orb-c', f: 1.4 }
+    ];
+    function bind() {
+        orbs.forEach((o) => { if (!o.el) o.el = document.querySelector(o.sel); });
+    }
+    bind();
+
+    let targetX = 0, targetY = 0, curX = 0, curY = 0, raf = 0;
+    const MAX = 14; // px
+
+    function tick() {
+        curX += (targetX - curX) * 0.08;
+        curY += (targetY - curY) * 0.08;
+        bind();
+        orbs.forEach((o) => {
+            if (!o.el) return;
+            o.el.style.translate = `${(curX * o.f).toFixed(2)}px ${(curY * o.f).toFixed(2)}px`;
+        });
+        if (Math.abs(targetX - curX) > 0.05 || Math.abs(targetY - curY) > 0.05) {
+            raf = requestAnimationFrame(tick);
+        } else {
+            raf = 0;
+        }
+    }
+    function pump() { if (!raf) raf = requestAnimationFrame(tick); }
+
+    // Desktop: pointer-driven
+    const hasHover = window.matchMedia && window.matchMedia('(hover: hover)').matches;
+    if (hasHover) {
+        window.addEventListener('pointermove', (e) => {
+            if (e.pointerType === 'touch') return;
+            const w = window.innerWidth || 1;
+            const h = window.innerHeight || 1;
+            targetX = ((e.clientX / w) - 0.5) * 2 * MAX;
+            targetY = ((e.clientY / h) - 0.5) * 2 * MAX;
+            pump();
+        }, { passive: true });
+    }
+
+    // Mobile: gyro — opt-in only on iOS (Telegram WebApp on iOS doesn't expose
+    // backdrop issues we already fixed). On Android we disabled this entirely.
+    const ua = (navigator.userAgent || '').toLowerCase();
+    const isIOS = /iphone|ipad|ipod/.test(ua);
+    if (isIOS && typeof window.DeviceOrientationEvent !== 'undefined') {
+        const needPerm = typeof DeviceOrientationEvent.requestPermission === 'function';
+        function attachGyro() {
+            window.addEventListener('deviceorientation', (ev) => {
+                // gamma: left-right tilt (-90..90), beta: front-back (-180..180)
+                const gx = Math.max(-30, Math.min(30, ev.gamma || 0));
+                const gy = Math.max(-30, Math.min(30, ev.beta || 0));
+                targetX = (gx / 30) * MAX;
+                targetY = (gy / 30) * MAX;
+                pump();
+            }, { passive: true });
+        }
+        if (needPerm) {
+            // Ask once on first user gesture
+            const req = () => {
+                document.removeEventListener('click', req, true);
+                DeviceOrientationEvent.requestPermission()
+                    .then((res) => { if (res === 'granted') attachGyro(); })
+                    .catch(() => {});
+            };
+            document.addEventListener('click', req, true);
+        } else {
+            attachGyro();
+        }
+    }
+})();
 
 /* ── Ripple effect ── */
 function createRipple(event) {
@@ -6545,12 +8747,12 @@ function formatRnx(value, locale) {
 
 function formatRegistrationDate(value, locale) {
     if (!value) {
-        return new Date().toLocaleDateString(locale);
+        return new Date().toLocaleString(locale, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     }
 
     const parsed = new Date(value);
     if (!Number.isNaN(parsed.getTime())) {
-        return parsed.toLocaleDateString(locale);
+        return parsed.toLocaleString(locale, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     }
 
     return value;
@@ -6698,7 +8900,8 @@ const HEROES = [
             ua: 'Базовий стартовий робот для першого знайомства з RoboNexus. Допомагає швидко увійти в систему та почати заробляти. Доступний один раз. Прибуток лише на баланс покупок.'
         },
         palette: ['#0a1f15', '#10b981', '#34d399'],
-        image: 'images/hero_starter.png'
+        image: 'images/hero_starter.png',
+        model: 'images/textured_starter_mesh.glb'
     }),
     // ─── ОСНОВНІ 6 ГЕРОЇВ ──────────────────────────────────────────────────────
     createHeroTemplate({
@@ -6789,7 +8992,8 @@ const HEROES = [
             ua: 'Гігантський елітний робот із максимальною потужністю. Створений для великих інвестицій і стабільного доходу.'
         },
         palette: ['#111827', '#9a3412', '#fbbf24'],
-        image: 'images/hero_omega_titan.png'
+        image: 'images/hero_omega_titan.png',
+        model: 'images/textured_mesh.glb'
     }),
     createHeroTemplate({
         id: 'h6',
@@ -6818,8 +9022,8 @@ function getHeroById(heroId) {
 }
 
 function getPurchasedHeroes() {
-    const user = window.gameDB.getUser();
-    return Array.isArray(user.heroes) ? user.heroes : [];
+    const user = window.gameDB?.getUser ? window.gameDB.getUser() : null;
+    return Array.isArray(user?.heroes) ? user.heroes : [];
 }
 
 function ensureShopFilters(container) {
@@ -6839,6 +9043,81 @@ function ensureShopFilters(container) {
 
 function getFilteredHeroTemplates() {
     return HEROES.filter((hero) => APP_STATE.heroShopFilter === 'all' ? true : hero.rarityKey === APP_STATE.heroShopFilter);
+}
+
+function scrollShopHeroIntoView(heroId) {
+    if (!heroId) return;
+    requestAnimationFrame(() => {
+        const target = Array.from(document.querySelectorAll('[data-shop-hero-id]')).find((card) => String(card.dataset.shopHeroId) === String(heroId));
+        target?.scrollIntoView({ behavior: isPerfReducedMode() ? 'auto' : 'smooth', block: 'center' });
+    });
+}
+
+function closeShopHeroSheet() {
+    const sheet = document.getElementById('shop-hero-sheet');
+    if (sheet) sheet.remove();
+}
+
+function openShopHeroSheet(heroId) {
+    const hero = getHeroById(heroId);
+    if (!hero || !window.gameDB) return;
+    const locale = LANGUAGE_TO_LOCALE[getCurrentLanguage()] || 'ru-RU';
+    const isUa = getCurrentLanguage() === 'ua';
+    const heroText = getHeroTextSet();
+    const ownedHeroes = getPurchasedHeroes();
+    const localizedHero = getLocalizedHeroData(hero);
+    const projectedHero = enrichHeroWithEconomy(window.gameDB.normalizeHero(localizedHero), ownedHeroes);
+    const dailyRnx = Math.round(Number(projectedHero.boostedProfitPerHour || 0) * 24);
+    const rnxRate = (window.gameDB && typeof window.gameDB.getRnxRate === 'function') ? window.gameDB.getRnxRate() : 10000;
+    const priceTon = Number(hero.price || 0);
+    const roiDays = dailyRnx > 0 && priceTon > 0 ? Math.ceil((priceTon * rnxRate) / dailyRnx) : null;
+    const ownedCount = ownedHeroes.filter((item) => item.heroId === hero.id || item.id === hero.id).length;
+    const heroModel = localizedHero.model || hero.model || '';
+    const heroArt = heroModel
+        ? `<model-viewer class="shop-hero-sheet-model" src="${heroModel}" alt="${escapeHTML(localizedHero.name)}" ${getHeroModelViewerAttrs('detail')}></model-viewer>`
+        : `<img src="${localizedHero.image}" alt="${escapeHTML(localizedHero.name)}" loading="lazy" decoding="async">`;
+
+    closeShopHeroSheet();
+    const sheet = document.createElement('div');
+    sheet.id = 'shop-hero-sheet';
+    sheet.className = 'shop-hero-sheet';
+    sheet.innerHTML = `
+        <div class="shop-hero-sheet-backdrop" data-shop-sheet-close></div>
+        <section class="shop-hero-sheet-panel rarity-${hero.rarityKey}" role="dialog" aria-modal="true" aria-label="${escapeHTML(localizedHero.name)}">
+            <div class="shop-hero-sheet-grip"></div>
+            <button class="shop-hero-sheet-close" type="button" data-shop-sheet-close>×</button>
+            <div class="shop-hero-sheet-head">
+                <div class="shop-hero-sheet-art${heroModel ? ' has-model' : ''}">
+                    ${heroArt}
+                </div>
+                <div class="shop-hero-sheet-titlebox">
+                    <span>${getHeroRarityLabel(localizedHero)}</span>
+                    <h3>${escapeHTML(localizedHero.name)}</h3>
+                    <p>${escapeHTML(localizedHero.role || '')}</p>
+                </div>
+            </div>
+            <div class="shop-hero-sheet-stats">
+                <div><span>${heroText.price}</span><strong>${formatCurrency(hero.price, locale)}</strong></div>
+                <div><span>${heroText.currentIncome}</span><strong>${formatNumber(dailyRnx, locale)} RNX</strong></div>
+                <div><span>${isUa ? 'Окупність' : 'Окупаемость'}</span><strong>${roiDays ? `~${formatNumber(roiDays, locale)} ${isUa ? 'дн' : 'дн'}` : '—'}</strong></div>
+                <div><span>${isUa ? 'Ваших' : 'Ваших'}</span><strong>${formatNumber(ownedCount, locale)}</strong></div>
+            </div>
+            <p class="shop-hero-sheet-desc">${escapeHTML(localizedHero.description || '')}</p>
+            ${localizedHero.rules?.length ? `<div class="shop-hero-sheet-rules">${localizedHero.rules.map((rule) => `<span>${escapeHTML(rule)}</span>`).join('')}</div>` : ''}
+            <div class="shop-hero-sheet-actions">
+                <button class="shop-sheet-buy" type="button" data-shop-sheet-buy="${hero.id}">${hero.isTestHero ? (isUa ? 'Отримати' : 'Получить') : heroText.buy}</button>
+                <button class="shop-sheet-close-btn" type="button" data-shop-sheet-close>${isUa ? 'Закрити' : 'Закрыть'}</button>
+            </div>
+        </section>
+    `;
+    document.body.appendChild(sheet);
+    const sheetModel = sheet.querySelector('.shop-hero-sheet-model');
+    if (sheetModel) configureHeroModelViewer(sheetModel, localizedHero, 'detail');
+    sheet.querySelectorAll('[data-shop-sheet-close]').forEach((button) => button.addEventListener('click', closeShopHeroSheet));
+    sheet.querySelector('[data-shop-sheet-buy]')?.addEventListener('click', () => {
+        triggerHaptic('medium');
+        buyHero(hero.id);
+    });
 }
 
 function renderShop() {
@@ -6878,7 +9157,28 @@ function renderShop() {
     const visibleHeroes = getFilteredHeroTemplates();
     const shopSection = document.getElementById('shop-section');
     const cheapestHero = HEROES.reduce((cheapest, hero) => Number(hero.price || 0) < Number(cheapest?.price ?? Infinity) ? hero : cheapest, null);
-    const topDailyProfit = visibleHeroes.reduce((max, hero) => Math.max(max, Math.round(Number(hero.baseProfitPerHour || 0) * 24)), 0);
+    const rnxRate = (window.gameDB && typeof window.gameDB.getRnxRate === 'function') ? window.gameDB.getRnxRate() : 10000;
+    const shopInsights = HEROES.map((hero) => {
+        const localizedHero = getLocalizedHeroData(hero);
+        const projectedHero = enrichHeroWithEconomy(window.gameDB.normalizeHero(localizedHero), ownedHeroes);
+        const dailyRnx = Math.round(Number(projectedHero.boostedProfitPerHour || 0) * 24);
+        const priceTon = Number(hero.price || 0);
+        const roiDays = dailyRnx > 0 && priceTon > 0 ? Math.ceil((priceTon * rnxRate) / dailyRnx) : Infinity;
+        return { hero, localizedHero, dailyRnx, priceTon, roiDays };
+    });
+    const visibleInsights = shopInsights.filter((item) => visibleHeroes.some((hero) => hero.id === item.hero.id));
+    const topDailyProfit = visibleInsights.reduce((max, item) => Math.max(max, item.dailyRnx), 0);
+    const bestIncomeHero = shopInsights.slice().sort((left, right) => right.dailyRnx - left.dailyRnx)[0];
+    const bestRoiHero = shopInsights.filter((item) => Number.isFinite(item.roiDays)).sort((left, right) => left.roiDays - right.roiDays)[0];
+    const starterInsight = shopInsights.find((item) => item.hero.isTestHero) || shopInsights[0];
+    const focusedInsight = shopInsights.find((item) => String(item.hero.id) === String(APP_STATE.shopFocusHeroId || ''));
+    const modelInsight = visibleInsights.find((item) => item.localizedHero?.model || item.hero?.model)
+        || shopInsights.find((item) => item.localizedHero?.model || item.hero?.model);
+    const featuredInsight = focusedInsight || (APP_STATE.heroShopFilter === 'starter'
+        ? starterInsight
+        : (APP_STATE.heroShopFilter === 'all'
+            ? (modelInsight || bestRoiHero || bestIncomeHero || starterInsight)
+            : (modelInsight || visibleInsights.slice().sort((left, right) => right.dailyRnx - left.dailyRnx)[0] || bestIncomeHero || starterInsight)));
 
     if (shopSection) {
         let shopHero = document.getElementById('shop-cinematic-banner');
@@ -6925,8 +9225,7 @@ function renderShop() {
         if (openMyHeroesBtn && !openMyHeroesBtn.dataset.bound) {
             openMyHeroesBtn.dataset.bound = '1';
             openMyHeroesBtn.addEventListener('click', () => {
-                setActiveNavButton('mines');
-                handleNavigation('mines');
+                navigateTo('mines');
             });
         }
 
@@ -6934,10 +9233,87 @@ function renderShop() {
         if (openStatsBtn && !openStatsBtn.dataset.bound) {
             openStatsBtn.dataset.bound = '1';
             openStatsBtn.addEventListener('click', () => {
-                setActiveNavButton('stats');
-                handleNavigation('stats');
+                navigateTo('stats');
             });
         }
+
+        let decisionStrip = document.getElementById('shop-decision-strip');
+        if (!decisionStrip) {
+            decisionStrip = document.createElement('div');
+            decisionStrip.id = 'shop-decision-strip';
+            decisionStrip.className = 'shop-decision-strip';
+            shopHero.insertAdjacentElement('afterend', decisionStrip);
+        }
+        const decisionCards = [
+            { type: 'starter', label: isUa ? 'Старт' : 'Старт', title: starterInsight?.localizedHero?.name || 'Starter Bot', value: starterInsight?.hero?.price ? `${formatNumber(starterInsight.hero.price, locale)} TON` : '0 TON', filter: starterInsight?.hero?.rarityKey || 'starter' },
+            { type: 'income', label: isUa ? 'Макс. дохід' : 'Макс. доход', title: bestIncomeHero?.localizedHero?.name || 'Hero', value: `${formatNumber(bestIncomeHero?.dailyRnx || 0, locale)} RNX/д`, filter: bestIncomeHero?.hero?.rarityKey || 'all' },
+            { type: 'roi', label: isUa ? 'Окупність' : 'Окупаемость', title: bestRoiHero?.localizedHero?.name || 'Hero', value: bestRoiHero ? `~${formatNumber(bestRoiHero.roiDays, locale)} дн` : '—', filter: bestRoiHero?.hero?.rarityKey || 'all' }
+        ];
+        decisionStrip.innerHTML = decisionCards.map((item) => `
+            <button class="shop-decision-card shop-decision-${item.type}${APP_STATE.shopDecisionType === item.type ? ' is-active' : ''}" type="button" data-shop-filter-jump="${item.filter}" data-shop-decision-type="${item.type}" aria-pressed="${APP_STATE.shopDecisionType === item.type ? 'true' : 'false'}">
+                <span>${item.label}</span>
+                <strong>${escapeHTML(item.title)}</strong>
+                <em>${item.value}</em>
+            </button>
+        `).join('');
+        decisionStrip.querySelectorAll('[data-shop-filter-jump]').forEach((button) => {
+            button.addEventListener('click', () => {
+                APP_STATE.heroShopFilter = button.dataset.shopFilterJump || 'all';
+                APP_STATE.shopDecisionType = button.dataset.shopDecisionType || '';
+                renderShop();
+            });
+        });
+
+        let showcase = document.getElementById('shop-showcase-panel');
+        if (!showcase) {
+            showcase = document.createElement('section');
+            showcase.id = 'shop-showcase-panel';
+            showcase.className = 'shop-showcase-panel';
+            decisionStrip.insertAdjacentElement('afterend', showcase);
+        }
+        const featuredHero = featuredInsight?.hero;
+        const featuredLocalized = featuredInsight?.localizedHero || (featuredHero ? getLocalizedHeroData(featuredHero) : null);
+        const featuredOwnedCount = featuredHero ? ownedHeroes.filter((item) => item.heroId === featuredHero.id || item.id === featuredHero.id).length : 0;
+        const featuredRoi = featuredInsight && Number.isFinite(featuredInsight.roiDays) ? `~${formatNumber(featuredInsight.roiDays, locale)} ${isUa ? 'дн' : 'дн'}` : '—';
+        const featuredImage = featuredLocalized?.image || 'images/bot_welcome.jpg';
+        const featuredModel = featuredLocalized?.model || featuredHero?.model || '';
+        showcase.innerHTML = featuredHero ? `
+            <div class="shop-showcase-copy">
+                <span class="shop-showcase-kicker">${isUa ? 'Рекомендація' : 'Рекомендация'}</span>
+                <h3 class="shop-showcase-title">${escapeHTML(featuredLocalized.name)}</h3>
+                <p class="shop-showcase-desc">${escapeHTML(featuredLocalized.description || '')}</p>
+                <div class="shop-showcase-stats">
+                    <div><span>${isUa ? 'Ціна' : 'Цена'}</span><strong>${formatCurrency(featuredHero.price, locale)}</strong></div>
+                    <div><span>${isUa ? 'Дохід / день' : 'Доход / день'}</span><strong>${formatNumber(featuredInsight.dailyRnx || 0, locale)} RNX</strong></div>
+                    <div><span>${isUa ? 'Окупність' : 'Окупаемость'}</span><strong>${featuredRoi}</strong></div>
+                    <div><span>${isUa ? 'Ваших' : 'Ваших'}</span><strong>${formatNumber(featuredOwnedCount, locale)}</strong></div>
+                </div>
+                <div class="shop-showcase-actions">
+                    <button class="shop-showcase-btn shop-showcase-buy" type="button" data-shop-showcase-buy="${featuredHero.id}">${featuredHero.isTestHero ? (isUa ? 'Отримати' : 'Получить') : heroText.buy}</button>
+                    <button class="shop-showcase-btn shop-showcase-ghost" type="button" data-shop-showcase-details="${featuredHero.id}">${heroText.details}</button>
+                </div>
+            </div>
+            <div class="shop-showcase-visual rarity-${featuredHero.rarityKey}${featuredModel ? ' has-model' : ''}">
+                <div class="shop-showcase-rarity">${getHeroRarityLabel(featuredLocalized)}</div>
+                ${featuredModel
+                    ? `<model-viewer class="shop-showcase-model" src="${featuredModel}" alt="${escapeHTML(featuredLocalized.name)}" ${getHeroModelViewerAttrs('showcase')}></model-viewer>`
+                    : `<img src="${featuredImage}" alt="${escapeHTML(featuredLocalized.name)}" loading="lazy" decoding="async">`}
+            </div>
+        ` : '';
+        const showcaseModel = showcase.querySelector('.shop-showcase-model');
+        if (showcaseModel) configureHeroModelViewer(showcaseModel, featuredLocalized || featuredHero, 'showcase');
+        showcase.querySelector('[data-shop-showcase-buy]')?.addEventListener('click', () => {
+            triggerHaptic('medium');
+            buyHero(featuredHero.id);
+        });
+        showcase.querySelector('[data-shop-showcase-details]')?.addEventListener('click', () => {
+            APP_STATE.heroShopFilter = featuredHero.rarityKey || 'all';
+            APP_STATE.shopDecisionType = '';
+            APP_STATE.selectedShopHeroId = featuredHero.id;
+            APP_STATE.shopFocusHeroId = featuredHero.id;
+            renderShop();
+            scrollShopHeroIntoView(featuredHero.id);
+        });
     }
 
     container.innerHTML = '';
@@ -6963,68 +9339,78 @@ function renderShop() {
 
 function _renderShopCards(container, visibleHeroes, ownedHeroes, heroText, locale) {
     const isUa = getCurrentLanguage() === 'ua';
+    const rnxRate = (window.gameDB && typeof window.gameDB.getRnxRate === 'function') ? window.gameDB.getRnxRate() : 10000;
+    const heroComparisons = HEROES.map((hero) => {
+        const localizedHero = getLocalizedHeroData(hero);
+        const projectedHero = enrichHeroWithEconomy(window.gameDB.normalizeHero(localizedHero), ownedHeroes);
+        const dailyRnx = Math.round(Number(projectedHero.boostedProfitPerHour || 0) * 24);
+        const priceTon = Number(hero.price || 0);
+        const roiDays = dailyRnx > 0 && priceTon > 0 ? Math.ceil((priceTon * rnxRate) / dailyRnx) : Infinity;
+        return { id: hero.id, dailyRnx, roiDays };
+    });
+    const maxDailyRnx = heroComparisons.reduce((max, item) => Math.max(max, item.dailyRnx), 0);
+    const minRoiDays = heroComparisons.reduce((min, item) => Math.min(min, item.roiDays), Infinity);
+    container.className = 'shop-selector-rail';
     visibleHeroes.forEach((hero) => {
         const localizedHero = getLocalizedHeroData(hero);
         const projectedHero = enrichHeroWithEconomy(window.gameDB.normalizeHero(localizedHero), ownedHeroes);
         const ownedCount = ownedHeroes.filter((item) => item.heroId === hero.id || item.id === hero.id).length;
-        const detailsOpened = APP_STATE.selectedShopHeroId === hero.id;
         const isStarter = Boolean(hero.isTestHero);
+        const dailyRnx = Math.round(Number(projectedHero.boostedProfitPerHour || 0) * 24);
+        const priceTon = Number(hero.price || 0);
+        const roiDays = dailyRnx > 0 && priceTon > 0 ? Math.ceil((priceTon * rnxRate) / dailyRnx) : null;
+        const shopBadges = [
+            isStarter ? (isUa ? 'Кращий старт' : 'Лучший старт') : '',
+            dailyRnx > 0 && dailyRnx === maxDailyRnx ? (isUa ? 'Топ дохід' : 'Топ доход') : '',
+            roiDays && roiDays === minRoiDays ? (isUa ? 'Швидше окуп' : 'Быстрее окуп') : ''
+        ].filter(Boolean);
+        const heroModel = localizedHero.model || hero.model || '';
+        const heroArt = heroModel
+            ? `<model-viewer class="shop-row-mv" src="${heroModel}" alt="${escapeHTML(localizedHero.name)}" ${getHeroModelViewerAttrs('card')}></model-viewer>`
+            : `<img src="${localizedHero.image}" alt="${escapeHTML(localizedHero.name)}" loading="lazy" decoding="async">`;
         const card = document.createElement('article');
-        card.className = `hero-card rarity-${hero.rarityKey}`;
+        card.className = `shop-compact-row shop-selector-item rarity-${hero.rarityKey}${heroModel ? ' has-model' : ''}${ownedCount > 0 ? ' is-owned-shop-card' : ''}${APP_STATE.shopFocusHeroId === hero.id ? ' is-shop-focus-card' : ''}`;
+        card.dataset.shopHeroId = hero.id;
         card.innerHTML = `
-            <div class="hero-card-media">
-                <div class="hero-card-media-grid"></div>
-                <div class="hero-card-media-orb"></div>
-                <img class="hero-img" src="${localizedHero.image}" alt="${localizedHero.name}">
-                <span class="hero-rarity-chip rarity-${hero.rarityKey}">${getHeroRarityLabel(localizedHero)}</span>
-                <span class="hero-owned-chip${ownedCount > 0 ? ' hero-owned-chip-owned' : ''}">${ownedCount > 0 ? `✓ ${ownedCount}` : isUa ? 'Немає' : 'Нет'}</span>
-                <span class="hero-card-spotlight hero-card-spotlight-${isStarter ? 'starter' : 'premium'}">${isStarter ? '⚗ ТЕСТ' : '★ PREMIUM'}</span>
+            <div class="shop-row-art">
+                ${heroArt}
             </div>
-            <div class="hero-card-body">
-                <div class="hero-meta hero-meta-vertical">
-                    <div>
-                        <div class="hero-title">${localizedHero.name}</div>
-                        <div class="hero-sub">${heroText.rarity}: ${getHeroRarityLabel(localizedHero)} · ${heroText.role}: ${localizedHero.role}</div>
-                    </div>
-                    <div class="hero-price-block">
-                        <span class="hero-price-label">${heroText.price}</span>
-                        <span class="hero-price-value">${formatCurrency(hero.price, locale)}</span>
-                    </div>
+            <div class="shop-row-main">
+                <div class="shop-row-titleline">
+                    <strong>${escapeHTML(localizedHero.name)}</strong>
+                    <span>${getHeroRarityLabel(localizedHero)}</span>
                 </div>
-                <p class="hero-description">${localizedHero.description}</p>
-                <div class="hero-stats-grid">
-                    <div class="hero-stat-tile"><span>${heroText.currentIncome}</span><strong>${formatHeroDailyProfit(projectedHero, locale)}</strong></div>
-                    <div class="hero-stat-tile"><span>${heroText.totalIncome}</span><strong>${formatRnx(projectedHero.boostedTotalProfit, locale)}</strong></div>
-                    <div class="hero-stat-tile"><span>${heroText.duration}</span><strong>${formatHeroDuration(hero.durationHours, locale)}</strong></div>
-                    <div class="hero-stat-tile hero-stat-roi"><span>${isUa ? 'Окупність' : 'Окупаемость'}</span><strong>${(() => { const rnxRate = (window.gameDB && typeof window.gameDB.getRnxRate === 'function') ? window.gameDB.getRnxRate() : 10000; const dailyRnx = (projectedHero.boostedProfitPerHour || 0) * 24; const roiDays = dailyRnx > 0 ? Math.ceil((hero.price * rnxRate) / dailyRnx) : null; return roiDays ? `~${formatNumber(roiDays, locale)} ${isUa ? 'дн' : 'дн'}` : '—'; })()}</strong></div>
-                </div>
-                <div class="hero-inline-flags">
-                    <span class="hero-inline-flag">${isUa ? 'Клас' : 'Класс'}: ${localizedHero.role}</span>
-                    <span class="hero-inline-flag hero-synergy-flag" title="${isUa ? 'Синергія: бонус за роботу з героями схожого класу/рарності. Що більше героїв — то вищий бонус до доходу.' : 'Синергия: бонус за совместную работу героев схожего класса/редкости. Чем больше героев — тем выше бонус к доходу.'}">${isUa ? 'Синергія' : 'Синергия'} +${Math.round(projectedHero.synergyBonus * 100)}% ℹ</span>
-                </div>
-                <div class="hero-actions-row">
-                    <button class="hero-secondary-btn" type="button" data-hero-details="${hero.id}">${detailsOpened ? heroText.collapse : heroText.details}</button>
-                    <button class="buy-btn" type="button" data-hero-buy="${hero.id}">${heroText.buy}</button>
-                </div>
-                ${detailsOpened ? `
-                    <div class="hero-detail-panel">
-                        <div class="hero-detail-line"><span>${heroText.detailsTitle}</span><strong>${localizedHero.description}</strong></div>
-                        <div class="hero-detail-line"><span>${heroText.price}</span><strong>${formatCurrency(hero.price, locale)}</strong></div>
-                        <div class="hero-detail-line"><span>${heroText.synergy}</span><strong>+${Math.round(projectedHero.synergyBonus * 100)}%</strong></div>
-                        <div class="hero-detail-line"><span>${heroText.source}</span><strong>${heroText.shopSource}</strong></div>
-                        ${localizedHero.rules?.length ? `<div class="hero-detail-line"><span>${heroText.rules}</span><strong>${localizedHero.rules.map((rule) => escapeHTML(rule)).join(' • ')}</strong></div>` : ''}
-                    </div>
-                ` : ''}
+                <div class="shop-row-subline">${escapeHTML(localizedHero.role || '')}${ownedCount > 0 ? ` · ${isUa ? 'Ваших' : 'Ваших'}: ${formatNumber(ownedCount, locale)}` : ''}</div>
+                <div class="shop-row-badges">${shopBadges.slice(0, 2).map((badge) => `<span>${badge}</span>`).join('') || `<span>${isStarter ? (isUa ? 'Старт' : 'Старт') : (isUa ? 'Каталог' : 'Каталог')}</span>`}</div>
+            </div>
+            <div class="shop-row-metrics">
+                <div><span>${heroText.price}</span><strong>${formatCurrency(hero.price, locale)}</strong></div>
+                <div><span>${isUa ? 'День' : 'День'}</span><strong>${formatNumber(dailyRnx, locale)} RNX</strong></div>
+                <div><span>${isUa ? 'Окуп' : 'Окуп'}</span><strong>${roiDays ? `~${formatNumber(roiDays, locale)}д` : '—'}</strong></div>
+            </div>
+            <div class="shop-row-actions">
+                <button class="shop-row-info" type="button" data-hero-details="${hero.id}">${heroText.details}</button>
+                <button class="shop-row-buy" type="button" data-hero-buy="${hero.id}">${hero.isTestHero ? (isUa ? 'Отримати' : 'Получить') : heroText.buy}</button>
             </div>
         `;
 
         const detailsButton = card.querySelector('[data-hero-details]');
         if (detailsButton) {
             detailsButton.addEventListener('click', () => {
-                APP_STATE.selectedShopHeroId = APP_STATE.selectedShopHeroId === hero.id ? '' : hero.id;
-                renderShop();
+                APP_STATE.shopFocusHeroId = hero.id;
+                openShopHeroSheet(hero.id);
             });
         }
+
+        const rowModel = card.querySelector('.shop-row-mv');
+        if (rowModel) configureHeroModelViewer(rowModel, localizedHero, 'card');
+
+        card.addEventListener('click', (event) => {
+            if (event.target.closest('button')) return;
+            APP_STATE.shopFocusHeroId = hero.id;
+            APP_STATE.shopDecisionType = '';
+            renderShop();
+        });
 
         const buyButton = card.querySelector('[data-hero-buy]');
         if (buyButton) {
@@ -7307,11 +9693,17 @@ function renderHeroDetailModal() {
         <div class="hero-profile-layout premium-hero-profile rarity-${displayHero.rarityKey}">
             <div class="hero-profile-visual rarity-${displayHero.rarityKey}" style="--hero-accent:${rc.accent}; --hero-border:${rc.border}; --hero-glow:${rc.glow};">
                 <div class="hero-profile-glow"></div>
-                <img src="${displayHero.image}" alt="${displayHero.name}">
+                ${displayHero.model ? `<model-viewer class="hero-profile-mv" src="${displayHero.model}" alt="${displayHero.name}"
+                    ${getHeroModelViewerAttrs('detail')}></model-viewer>`
+                : `<img src="${displayHero.image}" alt="${displayHero.name}">`}
                 <div class="hero-profile-badges">
                     <span class="hero-rarity-chip rarity-${displayHero.rarityKey}">${getHeroRarityLabel(displayHero)}</span>
                     <span class="hero-level-badge" style="background: linear-gradient(135deg, ${rc.accent}cc, ${rc.accent}88); color:#fff;">LVL ${displayHero.level}</span>
                 </div>
+                <button class="hero-profile-home-toggle${(() => { let s=''; try{s=localStorage.getItem(HOME_HERO_STORAGE_KEY)||'';}catch(_){} const id=displayHero.instanceId||displayHero.id||''; const tpl=displayHero.heroId||displayHero.templateId||displayHero.id||''; return (s && (s===id || s===tpl)) ? ' is-on' : ''; })()}" type="button" role="switch" data-hero-home-toggle="1" data-home-id="${displayHero.instanceId||displayHero.id||''}" data-home-tpl="${displayHero.heroId||displayHero.templateId||displayHero.id||''}" aria-label="${heroText.heroProfile}">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15 9 22 9.5 17 14.5 18.5 22 12 18 5.5 22 7 14.5 2 9.5 9 9"/></svg>
+                    <span class="hpht-lbl"></span>
+                </button>
                 <div class="hero-visual-caption">
                     <strong class="hero-visual-role">${displayHero.role || '-'}</strong>
                     <span class="hero-visual-source">${heroText.source}: ${getHeroSourceLabel(displayHero.source)}</span>
@@ -7366,6 +9758,38 @@ function renderHeroDetailModal() {
             if (depositBtn) depositBtn.click();
         });
     }
+    // Хук на тоггл «Главный герой» внутри модалки профиля
+    var homeBtn = body.querySelector('[data-hero-home-toggle]');
+    if (homeBtn) {
+        var isUaLang = getCurrentLanguage() === 'ua';
+        var refreshLbl = function () {
+            var on = homeBtn.classList.contains('is-on');
+            var lblEl = homeBtn.querySelector('.hpht-lbl');
+            if (lblEl) lblEl.textContent = on
+                ? (isUaLang ? 'На головному' : 'На главном')
+                : (isUaLang ? 'Зробити головним' : 'Сделать главным');
+            homeBtn.setAttribute('aria-checked', on ? 'true' : 'false');
+        };
+        refreshLbl();
+        homeBtn.addEventListener('click', function () {
+            var targetId = homeBtn.getAttribute('data-home-id') || homeBtn.getAttribute('data-home-tpl') || '';
+            if (!targetId) return;
+            var cur = '';
+            try { cur = localStorage.getItem(HOME_HERO_STORAGE_KEY) || ''; } catch (_) {}
+            var willBeOn = !homeBtn.classList.contains('is-on');
+            try {
+                if (willBeOn) localStorage.setItem(HOME_HERO_STORAGE_KEY, targetId);
+                else localStorage.setItem(HOME_HERO_STORAGE_KEY, '__none__');
+            } catch (_) {}
+            homeBtn.classList.toggle('is-on', willBeOn);
+            refreshLbl();
+            if (typeof renderHome === 'function') renderHome();
+            if (typeof renderUserHeroes === 'function') try { renderUserHeroes(); } catch (_) {}
+            if (window.Telegram?.WebApp?.HapticFeedback?.impactOccurred) {
+                try { window.Telegram.WebApp.HapticFeedback.impactOccurred('light'); } catch (_) {}
+            }
+        });
+    }
 }
 
 function createOwnedHeroCard(hero, options = {}) {
@@ -7381,9 +9805,117 @@ function createOwnedHeroCard(hero, options = {}) {
 
     card.className = `my-hero-item hero-card owned-hero-card rarity-${rarityKey}`;
 
+    // Is this hero currently the "home" hero?
+    let savedHomeId = '';
+    try { savedHomeId = localStorage.getItem(HOME_HERO_STORAGE_KEY) || ''; } catch (_) {}
+    const homeMatchId = displayHero.instanceId || displayHero.id || '';
+    const homeTplId = displayHero.heroId || displayHero.templateId || displayHero.id || '';
+    const isHomeHero = !!savedHomeId && (savedHomeId === homeMatchId || savedHomeId === homeTplId);
+    if (isHomeHero) card.classList.add('is-home-hero');
+
+    const heroModel = displayHero.model || hero.model || '';
+    const mediaInner = heroModel
+        ? `<model-viewer class="hero-card-mv" src="${heroModel}" alt="${displayHero.name}"
+                ${getHeroModelViewerAttrs('card')}></model-viewer>`
+        : `<img class="hero-img" src="${displayHero.image}" alt="${displayHero.name}" loading="lazy">`;
+
+    const isUaLang = getCurrentLanguage() === 'ua';
+    const homeBtnLabel = isHomeHero
+        ? (isUaLang ? 'На головному' : 'На главном')
+        : (isUaLang ? 'Зробити головним' : 'Сделать главным');
+    const homeBtnAria = isUaLang ? 'Перемкнути героя на головному екрані' : 'Сделать этого героя главным';
+
+    if (interactive) {
+        const heroImage = displayHero.image || hero.image || 'images/hero_starter.png';
+        const heroModelUrl = displayHero.model || hero.model || '';
+        const isReady = cyclePct >= 100;
+        const rarityLabel = getHeroRarityLabel(displayHero) || '';
+        const dailyProfit = formatHeroDailyProfit(displayHero, locale);
+        const synergyPct = `+${Math.round(displayHero.synergyBonus * 100)}%`;
+        const upgradeLocked = displayHero.isTestHero || Number(displayHero.level || 1) >= 10;
+        const upgradeLabel = displayHero.isTestHero
+            ? heroText.noUpgradeBtn
+            : Number(displayHero.level || 1) >= 10
+                ? heroText.maxLevelBtn
+                : heroText.cardUpgradeHint;
+        const mediaMarkup = heroModelUrl
+            ? `<model-viewer class="owned-row-mv" src="${heroModelUrl}" alt="${escapeHTML(displayHero.name)}" ${getHeroModelViewerAttrs('card')}></model-viewer>`
+            : `<img src="${heroImage}" alt="${escapeHTML(displayHero.name)}" loading="lazy" decoding="async">`;
+        const homeOnLabel = isUaLang ? 'Головний' : 'Главный';
+        const homeOffLabel = isUaLang ? 'Зробити' : 'Назначить';
+        card.className = `my-hero-item owned-compact-row owned-card-v41 rarity-${rarityKey}${isHomeHero ? ' is-home-hero' : ''}${isReady ? ' is-ready' : ''}${heroModelUrl ? ' has-3d' : ''}`;
+        card.innerHTML = `
+            <div class="owned-row-art${heroModelUrl ? ' owned-row-art-3d' : ''}">
+                ${mediaMarkup}
+                <span class="owned-row-rarity rarity-${rarityKey}">${escapeHTML(rarityLabel)}</span>
+                <span class="owned-row-lvl">LVL ${displayHero.level || 1}</span>
+                ${isReady ? '<span class="owned-row-ready-pulse" aria-hidden="true"></span>' : ''}
+            </div>
+            <div class="owned-row-main">
+                <div class="owned-row-titleline">
+                    <strong>${escapeHTML(displayHero.name)}</strong>
+                    <button class="owned-row-home${isHomeHero ? ' is-on' : ''}" type="button" aria-label="${homeBtnAria}" data-home-id="${homeMatchId}" data-home-tpl="${homeTplId}" title="${homeBtnLabel}">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="${isHomeHero ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15 9 22 9.5 17 14.5 18.5 22 12 18 5.5 22 7 14.5 2 9.5 9 9"/></svg>
+                    </button>
+                </div>
+                <div class="owned-row-subline">${escapeHTML(displayHero.role || '')}</div>
+                <div class="owned-row-stats">
+                    <div class="owned-row-stat owned-row-stat-income"><span>${heroText.currentIncome}</span><strong>${dailyProfit}</strong></div>
+                    <div class="owned-row-stat owned-row-stat-syn"><span>${heroText.synergy}</span><strong>${synergyPct}</strong></div>
+                </div>
+                <div class="owned-row-progress-block${isReady ? ' is-ready' : ''}">
+                    <div class="owned-row-progress"><span style="width:${cyclePct}%"></span></div>
+                    <div class="owned-row-progress-meta">
+                        <span>${isReady ? heroText.readyForClaim : heroText.miningProgress}</span>
+                        <strong>${isReady ? '100%' : displayHero.countdown}</strong>
+                    </div>
+                </div>
+                <div class="owned-row-actions">
+                    <button class="owned-row-collect${isReady ? ' is-ready' : ''}" type="button"${isReady ? '' : ' disabled'}>${isReady ? heroText.collectIncome : heroText.incomePending}</button>
+                    <button class="owned-row-detail" type="button" aria-label="${heroText.details}">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    </button>
+                    <button class="owned-row-upgrade${upgradeLocked ? ' is-locked' : ''}" type="button"${upgradeLocked ? ' disabled' : ''} aria-label="${upgradeLabel}">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+                    </button>
+                </div>
+            </div>
+        `;
+        if (heroModelUrl) {
+            const mv = card.querySelector('.owned-row-mv');
+            if (mv) configureHeroModelViewer(mv, displayHero, 'card');
+        }
+        card.querySelector('.owned-row-detail')?.addEventListener('click', () => openHeroDetailModal(displayHero.instanceId));
+        card.querySelector('.owned-row-upgrade:not(.is-locked)')?.addEventListener('click', () => upgradeHero(displayHero.instanceId));
+        card.querySelector('.owned-row-collect.is-ready')?.addEventListener('click', () => {
+            try { triggerHaptic && triggerHaptic('medium'); } catch (_) {}
+            const changed = processHeroEconomy();
+            if (changed) {
+                renderApp();
+                showNotification(heroText.incomeCreditedTitle, 'success');
+                return;
+            }
+            showNotification(heroText.miningProgress, 'info');
+        });
+        card.querySelector('.owned-row-home')?.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const targetId = ev.currentTarget.getAttribute('data-home-id') || ev.currentTarget.getAttribute('data-home-tpl') || '';
+            let cur = '';
+            try { cur = localStorage.getItem(HOME_HERO_STORAGE_KEY) || ''; } catch (_) {}
+            try {
+                if (cur === targetId) localStorage.setItem(HOME_HERO_STORAGE_KEY, '__none__');
+                else localStorage.setItem(HOME_HERO_STORAGE_KEY, targetId);
+            } catch (_) {}
+            renderMyHeroes();
+            try { renderHome(); } catch (_) {}
+            showNotification(cur === targetId ? (isUaLang ? 'Герой прибраний з головного екрану' : 'Герой убран с главного экрана') : (isUaLang ? 'Героя встановлено на головному екрані' : 'Герой выбран для главного экрана'), 'success');
+        });
+        return card;
+    }
+
     card.innerHTML = `
-        <div class="hero-card-media">
-            <img class="hero-img" src="${displayHero.image}" alt="${displayHero.name}" loading="lazy">
+        <div class="hero-card-media${heroModel ? ' hero-card-media-3d' : ''}">
+            ${mediaInner}
             <span class="hero-rarity-chip rarity-${rarityKey}">${getHeroRarityLabel(displayHero)}</span>
             <span class="hero-owned-chip owned-lvl-badge">LVL ${displayHero.level || 1}</span>
         </div>
@@ -7393,6 +9925,11 @@ function createOwnedHeroCard(hero, options = {}) {
                     <div class="hero-title">${displayHero.name}</div>
                     <div class="hero-sub">${displayHero.role || ''}</div>
                 </div>
+                ${interactive ? `
+                <button class="hero-home-toggle${isHomeHero ? ' is-on' : ''}" type="button" role="switch" aria-checked="${isHomeHero ? 'true' : 'false'}" aria-label="${homeBtnAria}" data-home-id="${homeMatchId}" data-home-tpl="${homeTplId}">
+                    <span class="hero-home-toggle-track"><span class="hero-home-toggle-thumb"></span></span>
+                    <span class="hero-home-toggle-label">${homeBtnLabel}</span>
+                </button>` : ''}
             </div>
             <div class="hero-stats-grid">
                 <div class="hero-stat-tile"><span>${heroText.currentIncome}</span><strong>${formatHeroDailyProfit(displayHero, locale)}</strong></div>
@@ -7416,6 +9953,10 @@ function createOwnedHeroCard(hero, options = {}) {
             ${interactive ? `
             <div class="hero-actions-row">
                 <button class="hero-secondary-btn hero-view-btn" type="button">${heroText.details}</button>
+                <button class="hero-collect-btn${cyclePct >= 100 ? ' is-ready' : ''}" type="button"${cyclePct >= 100 ? '' : ' disabled'}>
+                    <span>${cyclePct >= 100 ? heroText.collectIncome : heroText.incomePending}</span>
+                    <strong>${cyclePct >= 100 ? formatRnx(displayHero.boostedTotalProfit || displayHero.accruedCurrentCycle || 0, locale) : displayHero.countdown}</strong>
+                </button>
                 <button class="buy-btn hero-upgrade-btn${(displayHero.isTestHero || Number(displayHero.level || 1) >= 10) ? ' upgrade-locked' : ''}" type="button"${(displayHero.isTestHero || Number(displayHero.level || 1) >= 10) ? ' disabled' : ''}>${
                     displayHero.isTestHero ? heroText.noUpgradeBtn :
                     Number(displayHero.level || 1) >= 10 ? heroText.maxLevelBtn :
@@ -7440,6 +9981,61 @@ function createOwnedHeroCard(hero, options = {}) {
         if (upgradeButton) upgradeButton.addEventListener('click', () => upgradeHero(displayHero.instanceId));
         const viewButton = card.querySelector('.hero-view-btn');
         if (viewButton) viewButton.addEventListener('click', () => openHeroDetailModal(displayHero.instanceId));
+        const collectButton = card.querySelector('.hero-collect-btn.is-ready');
+        if (collectButton) {
+            collectButton.addEventListener('click', () => {
+                try { triggerHaptic && triggerHaptic('medium'); } catch (_) {}
+                const changed = processHeroEconomy();
+                if (changed) {
+                    renderApp();
+                    showNotification(heroText.incomeCreditedTitle, 'success');
+                    return;
+                }
+                showNotification(heroText.miningProgress, 'info');
+            });
+        }
+
+        const homeToggle = card.querySelector('.hero-home-toggle');
+        if (homeToggle) {
+            homeToggle.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                ev.preventDefault();
+                try { triggerHaptic && triggerHaptic('light'); } catch (_) {}
+                const targetId = homeToggle.getAttribute('data-home-id') || homeToggle.getAttribute('data-home-tpl') || '';
+                let cur = '';
+                try { cur = localStorage.getItem(HOME_HERO_STORAGE_KEY) || ''; } catch (_) {}
+                const willBeOn = !(cur === targetId);
+                try {
+                    if (willBeOn) localStorage.setItem(HOME_HERO_STORAGE_KEY, targetId);
+                    else localStorage.setItem(HOME_HERO_STORAGE_KEY, '__none__');
+                } catch (_) {}
+                // Update siblings: only one can be active at a time
+                document.querySelectorAll('.hero-home-toggle.is-on').forEach((btn) => {
+                    btn.classList.remove('is-on');
+                    btn.setAttribute('aria-checked', 'false');
+                    const lbl = btn.querySelector('.hero-home-toggle-label');
+                    if (lbl) lbl.textContent = isUaLang ? 'Зробити головним' : 'Сделать главным';
+                    const parentCard = btn.closest('.owned-hero-card');
+                    if (parentCard) parentCard.classList.remove('is-home-hero');
+                });
+                if (willBeOn) {
+                    homeToggle.classList.add('is-on');
+                    homeToggle.setAttribute('aria-checked', 'true');
+                    const lbl = homeToggle.querySelector('.hero-home-toggle-label');
+                    if (lbl) lbl.textContent = isUaLang ? 'На головному' : 'На главном';
+                    card.classList.add('is-home-hero');
+                }
+                try { renderHome(); } catch (_) {}
+                if (typeof showNotification === 'function') {
+                    showNotification(
+                        willBeOn
+                            ? (isUaLang ? 'Героя встановлено на головному екрані' : 'Герой выбран для главного экрана')
+                            : (isUaLang ? 'Герой прибраний з головного екрану' : 'Герой убран с главного экрана'),
+                        'success'
+                    );
+                }
+            });
+        }
     }
 
     return card;
@@ -7471,8 +10067,7 @@ function renderMyHeroes() {
         const openShopBtn = empty.querySelector('.my-heroes-empty-btn');
         if (openShopBtn) {
             openShopBtn.addEventListener('click', () => {
-                setActiveNavButton('shop');
-                handleNavigation('shop');
+                navigateTo('shop');
             });
         }
         list.appendChild(empty);
@@ -7482,6 +10077,9 @@ function renderMyHeroes() {
     const projectedIncome = enrichedHeroes.reduce((sum, hero) => sum + Number(hero.boostedTotalProfit || 0), 0);
     const nextCycleHero = enrichedHeroes.slice().sort((left, right) => new Date(left.cycleEndsAt).getTime() - new Date(right.cycleEndsAt).getTime())[0];
     const leadHero = enrichedHeroes[0] || null;
+    const readyHeroes = enrichedHeroes.filter((hero) => hero.countdown === heroText.cycleReady);
+    const liveHeroes = enrichedHeroes.filter((hero) => hero.countdown !== heroText.cycleReady);
+    const topLevel = enrichedHeroes.reduce((max, hero) => Math.max(max, Number(hero.level || 1)), 0);
     const myHeroesShell = list.parentElement;
 
     if (myHeroesShell) {
@@ -7492,26 +10090,33 @@ function renderMyHeroes() {
             heroBanner.className = 'my-heroes-cinematic-banner';
             heroBanner.innerHTML = `
                 <div class="my-heroes-cinematic-copy">
-                    <span class="my-heroes-cinematic-kicker">ELITE GARAGE</span>
-                    <h3 class="my-heroes-cinematic-title">Колекція героїв під вашим контролем</h3>
-                    <p class="my-heroes-cinematic-subtitle">Відстежуйте лідера колекції, сумарний дохід та найближчий цикл без зайвих переходів.</p>
+                    <span class="my-heroes-cinematic-kicker" id="my-heroes-banner-kicker">ELITE GARAGE</span>
+                    <h3 class="my-heroes-cinematic-title" id="my-heroes-banner-title"></h3>
+                    <p class="my-heroes-cinematic-subtitle" id="my-heroes-banner-subtitle"></p>
                     <div class="my-heroes-cinematic-chips">
-                        <div class="my-heroes-cinematic-chip"><span>Героїв</span><strong id="my-heroes-hero-count">0</strong></div>
-                        <div class="my-heroes-cinematic-chip"><span>Дохід</span><strong id="my-heroes-hero-income">0 RNX</strong></div>
-                        <div class="my-heroes-cinematic-chip"><span>Бонус</span><strong id="my-heroes-hero-bonus">0%</strong></div>
-                        <div class="my-heroes-cinematic-chip"><span>Наступний цикл</span><strong id="my-heroes-hero-next">--:--:--</strong></div>
+                        <div class="my-heroes-cinematic-chip"><span id="my-heroes-banner-count-label"></span><strong id="my-heroes-hero-count">0</strong></div>
+                        <div class="my-heroes-cinematic-chip"><span id="my-heroes-banner-income-label"></span><strong id="my-heroes-hero-income">0 RNX</strong></div>
+                        <div class="my-heroes-cinematic-chip"><span id="my-heroes-banner-bonus-label"></span><strong id="my-heroes-hero-bonus">0%</strong></div>
+                        <div class="my-heroes-cinematic-chip"><span id="my-heroes-banner-next-label"></span><strong id="my-heroes-hero-next">--:--:--</strong></div>
                     </div>
                     <button class="my-heroes-cinematic-btn" id="my-heroes-top-hero-btn" type="button">Деталі лідера</button>
                 </div>
                 <div class="my-heroes-cinematic-visual">
                     <div class="my-heroes-cinematic-ring"></div>
                     <div class="my-heroes-cinematic-badge" id="my-heroes-banner-rarity">Колекція</div>
+                    <model-viewer class="my-heroes-cinematic-model hidden" id="my-heroes-banner-model" src="images/textured_starter_mesh.glb" alt="" ${getHeroModelViewerAttrs('farm')}></model-viewer>
                     <img class="my-heroes-cinematic-figure" id="my-heroes-banner-image" src="images/hero_starter.png" alt="" loading="lazy" decoding="async">
                 </div>
             `;
             myHeroesShell.insertBefore(heroBanner, list);
         }
 
+        setText('my-heroes-banner-title', isUa ? 'Колекція героїв під вашим контролем' : 'Коллекция героев под вашим контролем');
+        setText('my-heroes-banner-subtitle', isUa ? 'Відстежуйте лідера колекції, сумарний дохід та найближчий цикл без зайвих переходів.' : 'Следите за лидером коллекции, суммарным доходом и ближайшим циклом без лишних переходов.');
+        setText('my-heroes-banner-count-label', isUa ? 'Героїв' : 'Героев');
+        setText('my-heroes-banner-income-label', isUa ? 'Дохід' : 'Доход');
+        setText('my-heroes-banner-bonus-label', isUa ? 'Бонус' : 'Бонус');
+        setText('my-heroes-banner-next-label', isUa ? 'Наступний цикл' : 'Следующий цикл');
         setText('my-heroes-hero-count', formatNumber(heroes.length, locale));
         setText('my-heroes-hero-income', `${projectedIncome.toLocaleString(locale)} RNX`);
         setText('my-heroes-hero-bonus', `${Math.round(synergy.totalBonus * 100)}%`);
@@ -7519,8 +10124,16 @@ function renderMyHeroes() {
         setText('my-heroes-banner-rarity', leadHero ? getHeroRarityLabel(leadHero) : (isUa ? 'Старт колекції' : 'Старт коллекции'));
 
         const heroImage = document.getElementById('my-heroes-banner-image');
+        const heroModel = document.getElementById('my-heroes-banner-model');
+        const leadModelUrl = leadHero ? (leadHero.model || '') : '';
+        if (heroModel) {
+            if (leadModelUrl && heroModel.getAttribute('src') !== leadModelUrl) heroModel.setAttribute('src', leadModelUrl);
+            heroModel.classList.toggle('hidden', !leadModelUrl);
+            if (leadModelUrl) configureHeroModelViewer(heroModel, leadHero, 'farm');
+        }
         if (heroImage) {
             heroImage.src = leadHero ? leadHero.image : 'images/hero_starter.png';
+            heroImage.classList.toggle('hidden', !!leadModelUrl);
         }
 
         const topHeroBtn = document.getElementById('my-heroes-top-hero-btn');
@@ -7534,10 +10147,50 @@ function renderMyHeroes() {
                     openHeroDetailModal(leadHero.instanceId);
                     return;
                 }
-                setActiveNavButton('shop');
-                handleNavigation('shop');
+                navigateTo('shop');
             };
         }
+
+        let controlStrip = document.getElementById('my-heroes-control-strip');
+        if (!controlStrip) {
+            controlStrip = document.createElement('div');
+            controlStrip.id = 'my-heroes-control-strip';
+            controlStrip.className = 'my-heroes-control-strip';
+            heroBanner.insertAdjacentElement('afterend', controlStrip);
+        }
+        controlStrip.innerHTML = `
+            <button class="my-heroes-control-card my-heroes-control-ready" type="button" data-hero-control="ready">
+                <span>${isUa ? 'Готово' : 'Готово'}</span>
+                <strong>${formatNumber(readyHeroes.length, locale)}</strong>
+            </button>
+            <button class="my-heroes-control-card my-heroes-control-live" type="button" data-hero-control="live">
+                <span>${isUa ? 'Майнінг' : 'Майнинг'}</span>
+                <strong>${formatNumber(liveHeroes.length, locale)}</strong>
+            </button>
+            <button class="my-heroes-control-card my-heroes-control-level" type="button" data-hero-control="leader">
+                <span>${isUa ? 'Топ LVL' : 'Топ LVL'}</span>
+                <strong>${formatNumber(topLevel, locale)}</strong>
+            </button>
+            <button class="my-heroes-control-card my-heroes-control-shop" type="button" data-hero-control="shop">
+                <span>${isUa ? 'Підсилення' : 'Усиление'}</span>
+                <strong>${isUa ? 'Магазин' : 'Магазин'}</strong>
+            </button>
+        `;
+        controlStrip.querySelectorAll('[data-hero-control]').forEach((button) => {
+            button.addEventListener('click', () => {
+                const action = button.dataset.heroControl;
+                if (action === 'shop') return navigateTo('shop');
+                if (action === 'leader' && leadHero) return openHeroDetailModal(leadHero.instanceId);
+                const target = action === 'ready'
+                    ? list.querySelector('.owned-hero-card .hero-collect-btn.is-ready')?.closest('.owned-hero-card')
+                    : list.querySelector('.owned-hero-card');
+                if (target) {
+                    target.scrollIntoView({ behavior: isPerfReducedMode() ? 'auto' : 'smooth', block: 'center' });
+                    return;
+                }
+                showNotification(isUa ? 'Спочатку додайте героя з магазину' : 'Сначала добавьте героя из магазина', 'info');
+            });
+        });
     }
 
     heroes.forEach((hero, idx) => {
@@ -8135,6 +10788,79 @@ function escapeHTML(str) {
     window.scrollRevealObserve = observe;
 })();
 
+// ── 1b. MODEL-VIEWER VISIBILITY PAUSER ────────────────────────
+// Pauses auto-rotate on off-screen <model-viewer> elements to save GPU/RAF cost.
+// Visual unchanged: the user cannot see rotation that occurs off-screen anyway.
+(function initModelViewerPauser() {
+    'use strict';
+    if (!('IntersectionObserver' in window)) return;
+
+    function pause(mv) {
+        if (mv.dataset.mvPaused === '1') return;
+        const base = mv.getAttribute('rotation-per-second');
+        if (base && base !== '0deg' && !mv.dataset.baseRotationSpeed) {
+            mv.dataset.baseRotationSpeed = base;
+        }
+        mv.setAttribute('rotation-per-second', '0deg');
+        try { mv.pause && mv.pause(); } catch (_) {}
+        mv.dataset.mvPaused = '1';
+    }
+
+    function resume(mv) {
+        if (mv.dataset.mvPaused !== '1') return;
+        const base = mv.dataset.baseRotationSpeed || '6deg';
+        mv.setAttribute('rotation-per-second', base);
+        try { mv.play && mv.play(); } catch (_) {}
+        mv.dataset.mvPaused = '0';
+    }
+
+    const obs = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+            const mv = entry.target;
+            if (entry.isIntersecting && entry.intersectionRatio > 0) resume(mv);
+            else pause(mv);
+        });
+    }, { threshold: [0, 0.01], rootMargin: '120px 0px' });
+
+    function attach(mv) {
+        if (!mv || mv.dataset.mvObserved === '1') return;
+        mv.dataset.mvObserved = '1';
+        obs.observe(mv);
+    }
+
+    function scan(root) {
+        (root || document).querySelectorAll('model-viewer').forEach(attach);
+    }
+
+    if (document.readyState !== 'loading') scan();
+    else document.addEventListener('DOMContentLoaded', function() { scan(); });
+
+    const mo = new MutationObserver(function(muts) {
+        muts.forEach(function(m) {
+            m.addedNodes.forEach(function(n) {
+                if (n.nodeType !== 1) return;
+                if (n.tagName === 'MODEL-VIEWER') attach(n);
+                else if (n.querySelectorAll) n.querySelectorAll('model-viewer').forEach(attach);
+            });
+        });
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+
+    // Pause everything when tab/page hidden
+    document.addEventListener('visibilitychange', function() {
+        const hidden = document.hidden;
+        document.querySelectorAll('model-viewer').forEach(function(mv) {
+            if (hidden) pause(mv);
+            else if (mv.getBoundingClientRect && mv.dataset.mvObserved === '1') {
+                const r = mv.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight) resume(mv);
+            }
+        });
+    });
+
+    window.__mvPauser = { attach: attach, scan: scan };
+})();
+
 // ── 2. RIPPLE EFFECT ─────────────────────────────────────────
 (function initRipple() {
     'use strict';
@@ -8207,6 +10933,21 @@ function escapeHTML(str) {
         var startVal = parseFloat(String(el.textContent).replace(/[^0-9.,-]/g, '').replace(',', '.')) || 0;
         if (Math.abs(newVal - startVal) < 0.001) return; // no change
 
+        function formatValue(value) {
+            return prefix + (decimals > 0 ? Number(value).toFixed(decimals) : Math.round(value).toLocaleString(locale)) + suffix;
+        }
+
+        if (el._countUpFrame) {
+            cancelAnimationFrame(el._countUpFrame);
+            el._countUpFrame = null;
+        }
+
+        if (opts.instant || duration <= 0 || isPerfReducedMode() || document.visibilityState !== 'visible') {
+            el.textContent = formatValue(newVal);
+            el.dataset.countValue = String(newVal);
+            return;
+        }
+
         var start = null;
         function step(ts) {
             if (!start) start = ts;
@@ -8214,20 +10955,19 @@ function escapeHTML(str) {
             // ease-out-quint
             var ease = 1 - Math.pow(1 - progress, 5);
             var current = startVal + (newVal - startVal) * ease;
-            var disp = decimals > 0
-                ? current.toFixed(decimals)
-                : Math.round(current).toLocaleString(locale);
-            el.textContent = prefix + disp + suffix;
-            if (progress < 1) requestAnimationFrame(step);
+            el.textContent = formatValue(current);
+            if (progress < 1) el._countUpFrame = requestAnimationFrame(step);
             else {
-                el.textContent = prefix + (decimals > 0 ? newVal.toFixed(decimals) : newVal.toLocaleString(locale)) + suffix;
+                el._countUpFrame = null;
+                el.dataset.countValue = String(newVal);
+                el.textContent = formatValue(newVal);
                 el.classList.remove('num-updated');
                 void el.offsetWidth;
                 el.classList.add('num-updated');
                 el.addEventListener('animationend', function() { el.classList.remove('num-updated'); }, { once: true });
             }
         }
-        requestAnimationFrame(step);
+        el._countUpFrame = requestAnimationFrame(step);
     }
 
     window.countUp = countUp;
