@@ -7161,6 +7161,44 @@ function configureHeroModelViewer(viewer, hero, context = 'home') {
     viewer.removeAttribute('min-camera-orbit');
     viewer.removeAttribute('max-camera-orbit');
 
+    // ── Anti-"black model" hardening
+    // 1) Force eager reveal so model paints as soon as it loads (not on interaction)
+    // 2) Fall back to <img> if WebGL context lost or model errors out
+    viewer.setAttribute('reveal', 'auto');
+    viewer.setAttribute('loading', context === 'detail' || context === 'showcase' ? 'eager' : (viewer.getAttribute('loading') || 'lazy'));
+    if (!viewer.dataset.fallbackBound) {
+        viewer.dataset.fallbackBound = '1';
+        const fallbackToImage = () => {
+            const heroImage = hero?.image || viewer.getAttribute('poster') || '';
+            if (!heroImage) return;
+            const img = document.createElement('img');
+            img.src = heroImage;
+            img.alt = viewer.getAttribute('alt') || '';
+            img.loading = 'lazy';
+            img.decoding = 'async';
+            const cls = (viewer.className || '').split(/\s+/).filter(Boolean);
+            cls.forEach((c) => img.classList.add(c));
+            img.style.width = '100%';
+            img.style.height = '100%';
+            img.style.objectFit = 'cover';
+            viewer.replaceWith(img);
+        };
+        viewer.addEventListener('error', fallbackToImage, { once: true });
+        // Catch WebGL context loss (Safari iOS frequently sheds it under memory pressure)
+        const onContextLost = (e) => {
+            try { e.preventDefault?.(); } catch (_) {}
+            // Try to recover one frame later; if still no scene, fall back
+            window.setTimeout(() => {
+                if (!viewer.modelIsVisible) fallbackToImage();
+            }, 400);
+        };
+        viewer.addEventListener('webglcontextlost', onContextLost);
+        // Set poster image so we never see flat-black before paint
+        if (hero?.image && !viewer.getAttribute('poster')) {
+            viewer.setAttribute('poster', hero.image);
+        }
+    }
+
     if (context === 'home' && isStarter) {
         viewer.setAttribute('camera-orbit', '0deg 78deg 7.2m');
         viewer.setAttribute('field-of-view', '22deg');
@@ -7934,6 +7972,48 @@ function renderStatisticsSection() {
     if (document.getElementById('stats-section')?.classList.contains('hidden')) return;
     const stats = window.gameDB.getDatabaseStats();
     const locale = LANGUAGE_TO_LOCALE[getCurrentLanguage()] || 'ru-RU';
+    const _isUa = getCurrentLanguage() === 'ua';
+    const L = {
+        heroTitle: _isUa ? 'Пульс проєкту в реальному часі' : 'Пульс проекта в реальном времени',
+        heroSub: _isUa ? 'Ключові метрики, рух TON та активність користувачів в одному центрі моніторингу.' : 'Ключевые метрики, движение TON и активность пользователей в одном центре мониторинга.',
+        chipUsers: _isUa ? 'Користувачі' : 'Пользователи',
+        chipOnline: _isUa ? 'Онлайн' : 'Онлайн',
+        chipFlow: _isUa ? 'Оборот' : 'Оборот',
+        chipRnx: 'RNX',
+        heroBtn: _isUa ? 'Історія операцій' : 'История операций',
+        cardUsersLabel: _isUa ? 'КОРИСТУВАЧІ' : 'ПОЛЬЗОВАТЕЛИ',
+        cardUsersSub: _isUa ? 'Всього зареєстровано' : 'Всего зарегистрировано',
+        cardTodayLabel: _isUa ? 'КОРИСТУВАЧІ ЗА СЬОГОДНІ' : 'ПОЛЬЗОВАТЕЛИ ЗА СЕГОДНЯ',
+        cardTodaySub: _isUa ? 'Нових користувачів' : 'Новых пользователей',
+        cardDepositLabel: _isUa ? 'ПОПОВНЕНО TON' : 'ПОПОЛНЕНО TON',
+        cardDepositSub: _isUa ? 'Загальна сума поповнень' : 'Общая сумма пополнений',
+        cardWithdrawLabel: _isUa ? 'ВИПЛАЧЕНО TON' : 'ВЫПЛАЧЕНО TON',
+        cardWithdrawSub: _isUa ? 'Загальна сума виплат' : 'Общая сумма выплат',
+    };
+
+    // Localize static HTML labels in the section
+    const _setText = (sel, text) => { const el = document.querySelector(sel); if (el) el.textContent = text; };
+    _setText('#stats-label', _isUa ? 'Статистика' : 'Статистика');
+    _setText('#stats-title', _isUa ? 'Актуальні дані проєкту в реальному часі' : 'Актуальные данные проекта в реальном времени');
+    const _periodLabel = (v) => {
+        if (v === 'all') return _isUa ? 'Весь час' : 'Всё время';
+        if (v === '30') return _isUa ? '30 днів' : '30 дней';
+        return _isUa ? '7 днів' : '7 дней';
+    };
+    document.querySelectorAll('.stats-period-option').forEach((btn) => {
+        btn.textContent = _periodLabel(btn.dataset.period);
+    });
+    document.querySelectorAll('#stats-period-select option').forEach((opt) => {
+        opt.textContent = _periodLabel(opt.value);
+    });
+    const _curPeriod = document.getElementById('stats-period-select');
+    const _curEl = document.getElementById('stats-period-current');
+    if (_curEl) _curEl.textContent = _periodLabel(_curPeriod ? _curPeriod.value : '7');
+    const _statsSectionLabels = document.querySelectorAll('#stats-section .stats-section-label');
+    if (_statsSectionLabels[0]) _statsSectionLabels[0].textContent = _isUa ? 'ЗАГАЛЬНА СТАТИСТИКА' : 'ОБЩАЯ СТАТИСТИКА';
+    if (_statsSectionLabels[1]) _statsSectionLabels[1].textContent = _isUa ? 'ЖИВІ ПОДІЇ' : 'ЖИВЫЕ СОБЫТИЯ';
+    const _viewAllBtn = document.getElementById('stats-view-all-btn');
+    if (_viewAllBtn) _viewAllBtn.textContent = _isUa ? 'ДИВИТИСЬ ВСІ >' : 'СМОТРЕТЬ ВСЕ >';
     const allUsers = window.gameDB.getAllUsers ? window.gameDB.getAllUsers() : [];
     const today = new Date().toISOString().slice(0, 10);
     const todayUsers = allUsers.filter(u => u.registrationDate && u.registrationDate.slice(0, 10) === today).length;
@@ -7962,22 +8042,28 @@ function renderStatisticsSection() {
 
     if (statsSection) {
         let hero = document.getElementById('stats-cinematic-hero');
+        // Rebuild when language changes so chips/labels follow current locale
+        if (hero && hero.dataset.lang && hero.dataset.lang !== getCurrentLanguage()) {
+            hero.remove();
+            hero = null;
+        }
         if (!hero) {
             hero = document.createElement('section');
             hero.id = 'stats-cinematic-hero';
             hero.className = 'stats-cinematic-hero';
+            hero.dataset.lang = getCurrentLanguage();
             hero.innerHTML = `
                 <div class="stats-cinematic-copy">
                     <span class="stats-cinematic-kicker">LIVE CONTROL</span>
-                    <h3 class="stats-cinematic-title">Пульс проекту в реальному часі</h3>
-                    <p class="stats-cinematic-subtitle">Ключові метрики, рух TON та активність користувачів в одному центрі моніторингу.</p>
+                    <h3 class="stats-cinematic-title">${L.heroTitle}</h3>
+                    <p class="stats-cinematic-subtitle">${L.heroSub}</p>
                     <div class="stats-cinematic-chips">
-                        <div class="stats-cinematic-chip"><span>Користувачі</span><strong id="stats-hero-users">0</strong></div>
-                        <div class="stats-cinematic-chip"><span>Онлайн</span><strong id="stats-hero-online">0</strong></div>
-                        <div class="stats-cinematic-chip"><span>Оборот</span><strong id="stats-hero-total-flow">0 TON</strong></div>
-                        <div class="stats-cinematic-chip"><span>RNX</span><strong id="stats-hero-rnx">0</strong></div>
+                        <div class="stats-cinematic-chip"><span>${L.chipUsers}</span><strong id="stats-hero-users">0</strong></div>
+                        <div class="stats-cinematic-chip"><span>${L.chipOnline}</span><strong id="stats-hero-online">0</strong></div>
+                        <div class="stats-cinematic-chip"><span>${L.chipFlow}</span><strong id="stats-hero-total-flow">0 TON</strong></div>
+                        <div class="stats-cinematic-chip"><span>${L.chipRnx}</span><strong id="stats-hero-rnx">0</strong></div>
                     </div>
-                    <button class="stats-cinematic-btn" id="stats-hero-history-btn" type="button">Історія операцій</button>
+                    <button class="stats-cinematic-btn" id="stats-hero-history-btn" type="button">${L.heroBtn}</button>
                 </div>
                 <div class="stats-cinematic-visual">
                     <div class="stats-cinematic-ring"></div>
@@ -8023,10 +8109,10 @@ function renderStatisticsSection() {
             {
                 icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
                 iconClass: 'stats-card-icon-purple',
-                label: 'КОРИСТУВАЧІ',
+                label: L.cardUsersLabel,
                 rawValue: Number(stats.totalUsers || 0),
                 fmt: v => formatNumber(Math.round(v), locale),
-                sub: 'Всього зареєстровано',
+                sub: L.cardUsersSub,
                 unit: '',
                 sparkPoints: finalUserSpark,
                 sparkColor: '#a78bfa',
@@ -8036,10 +8122,10 @@ function renderStatisticsSection() {
             {
                 icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>`,
                 iconClass: 'stats-card-icon-blue',
-                label: 'КОРИСТУВАЧІ ЗА СЬОГОДНІ',
+                label: L.cardTodayLabel,
                 rawValue: Number(todayUsers || 0),
                 fmt: v => `+${Math.round(v)}`,
-                sub: 'Нових користувачів',
+                sub: L.cardTodaySub,
                 unit: '',
                 sparkPoints: finalTodaySpark,
                 sparkColor: '#93c5fd',
@@ -8049,10 +8135,10 @@ function renderStatisticsSection() {
             {
                 icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>`,
                 iconClass: 'stats-card-icon-green',
-                label: 'ПОПОВНЕНО TON',
+                label: L.cardDepositLabel,
                 rawValue: Number(stats.totalDeposits || 0),
                 fmt: v => v.toLocaleString(locale, {minimumFractionDigits: 2, maximumFractionDigits: 2}),
-                sub: 'Загальна сума поповнень',
+                sub: L.cardDepositSub,
                 unit: 'TON',
                 sparkPoints: finalDepositSpark,
                 sparkColor: '#6ee7b7',
@@ -8062,10 +8148,10 @@ function renderStatisticsSection() {
             {
                 icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
                 iconClass: 'stats-card-icon-amber',
-                label: 'ВИПЛАЧЕНО TON',
+                label: L.cardWithdrawLabel,
                 rawValue: Number(stats.totalWithdrawals || 0),
                 fmt: v => v.toLocaleString(locale, {minimumFractionDigits: 2, maximumFractionDigits: 2}),
-                sub: 'Загальна сума виплат',
+                sub: L.cardWithdrawSub,
                 unit: 'TON',
                 sparkPoints: finalWithdrawSpark,
                 sparkColor: '#fcd34d',
@@ -8074,9 +8160,10 @@ function renderStatisticsSection() {
             }
         ];
 
-        const alreadyRendered = cardsGrid.dataset.rendered === '1';
+        const alreadyRendered = cardsGrid.dataset.rendered === '1' && cardsGrid.dataset.lang === getCurrentLanguage();
         if (!alreadyRendered) {
             cardsGrid.dataset.rendered = '1';
+            cardsGrid.dataset.lang = getCurrentLanguage();
             cardsGrid.innerHTML = cardsData.map((c, i) => `
                 <div class="stats-card" data-reveal data-reveal-delay="${i + 1}">
                     <div class="stats-card-icon-wrap ${c.iconClass}">${c.icon}</div>
@@ -8175,7 +8262,7 @@ function renderStatisticsSection() {
         const displayEvents = events.slice(0, 7);
 
         if (!displayEvents.length) {
-            eventsList.innerHTML = `<div class="stats-event-row"><div class="stats-event-body"><div class="stats-event-title" style="color:var(--muted)">Подій поки немає</div></div></div>`;
+            eventsList.innerHTML = `<div class="stats-event-row"><div class="stats-event-body"><div class="stats-event-title" style="color:var(--muted)">${_isUa ? 'Подій поки немає' : 'Событий пока нет'}</div></div></div>`;
         } else {
             eventsList.innerHTML = displayEvents.map(ev => `
                 <div class="stats-event-row">
@@ -8196,10 +8283,10 @@ function renderStatisticsSection() {
     const bottomRow = document.getElementById('stats-bottom-row');
     if (bottomRow) {
         const chips = [
-            { icon: '🟢', value: formatNumber(stats.realOnlineCount || stats.onlineCount, locale), label: 'Онлайн зараз' },
-            { icon: '🤖', value: formatNumber(stats.totalHeroes, locale), label: 'Активні роботи' },
-            { icon: '💎', value: shortenLargeNumber(stats.totalRnx), label: 'Видобуто RNX' },
-            { icon: '🛡', value: `${Number(stats.totalWithdrawals).toFixed(2)} T`, label: 'Виплачено сьогодні' }
+            { icon: '🟢', value: formatNumber(stats.realOnlineCount || stats.onlineCount, locale), label: _isUa ? 'Онлайн зараз' : 'Онлайн сейчас' },
+            { icon: '🤖', value: formatNumber(stats.totalHeroes, locale), label: _isUa ? 'Активні роботи' : 'Активные роботы' },
+            { icon: '💎', value: shortenLargeNumber(stats.totalRnx), label: _isUa ? 'Видобуто RNX' : 'Добыто RNX' },
+            { icon: '🛡', value: `${Number(stats.totalWithdrawals).toFixed(2)} T`, label: _isUa ? 'Виплачено сьогодні' : 'Выплачено сегодня' }
         ];
         bottomRow.innerHTML = chips.map(ch => `
             <div class="stats-bottom-chip">
@@ -9245,33 +9332,52 @@ function openShopHeroSheet(heroId) {
     closeShopHeroSheet();
     const sheet = document.createElement('div');
     sheet.id = 'shop-hero-sheet';
-    sheet.className = 'shop-hero-sheet';
+    sheet.className = 'shop-hero-sheet shop-hero-sheet-v2';
+    const buyLabel = hero.isTestHero ? (isUa ? 'Отримати' : 'Получить') : heroText.buy;
+    const closeLabel = isUa ? 'Закрити' : 'Закрыть';
+    const detailsKicker = isUa ? 'ОГЛЯД ГЕРОЯ' : 'ОБЗОР ГЕРОЯ';
     sheet.innerHTML = `
         <div class="shop-hero-sheet-backdrop" data-shop-sheet-close></div>
         <section class="shop-hero-sheet-panel rarity-${hero.rarityKey}" role="dialog" aria-modal="true" aria-label="${escapeHTML(localizedHero.name)}">
-            <div class="shop-hero-sheet-grip"></div>
-            <button class="shop-hero-sheet-close" type="button" data-shop-sheet-close>×</button>
-            <div class="shop-hero-sheet-head">
+            <div class="shop-hero-sheet-glow" aria-hidden="true"></div>
+            <button class="shop-hero-sheet-close" type="button" data-shop-sheet-close aria-label="${closeLabel}">×</button>
+            <header class="shop-hero-sheet-header">
+                <div class="shop-hero-sheet-info">
+                    <span class="shop-hero-sheet-kicker">${detailsKicker}</span>
+                    <h3 class="shop-hero-sheet-title">${escapeHTML(localizedHero.name)}</h3>
+                    <div class="shop-hero-sheet-meta">
+                        <span class="shop-hero-sheet-rarity">${getHeroRarityLabel(localizedHero)}</span>
+                        <span class="shop-hero-sheet-role">${escapeHTML(localizedHero.role || '')}</span>
+                    </div>
+                </div>
                 <div class="shop-hero-sheet-art${heroModel ? ' has-model' : ''}">
                     ${heroArt}
+                    <div class="shop-hero-sheet-art-glow" aria-hidden="true"></div>
                 </div>
-                <div class="shop-hero-sheet-titlebox">
-                    <span>${getHeroRarityLabel(localizedHero)}</span>
-                    <h3>${escapeHTML(localizedHero.name)}</h3>
-                    <p>${escapeHTML(localizedHero.role || '')}</p>
-                </div>
-            </div>
+            </header>
             <div class="shop-hero-sheet-stats">
-                <div><span>${heroText.price}</span><strong>${formatCurrency(hero.price, locale)}</strong></div>
-                <div><span>${heroText.currentIncome}</span><strong>${formatNumber(dailyRnx, locale)} RNX</strong></div>
-                <div><span>${isUa ? 'Окупність' : 'Окупаемость'}</span><strong>${roiDays ? `~${formatNumber(roiDays, locale)} ${isUa ? 'дн' : 'дн'}` : '—'}</strong></div>
-                <div><span>${isUa ? 'Ваших' : 'Ваших'}</span><strong>${formatNumber(ownedCount, locale)}</strong></div>
+                <div class="shop-hero-sheet-stat stat-price">
+                    <span>${heroText.price}</span>
+                    <strong>${formatCurrency(hero.price, locale)}</strong>
+                </div>
+                <div class="shop-hero-sheet-stat stat-income">
+                    <span>${heroText.currentIncome}</span>
+                    <strong>${formatNumber(dailyRnx, locale)} <em>RNX</em></strong>
+                </div>
+                <div class="shop-hero-sheet-stat stat-roi">
+                    <span>${isUa ? 'Окупність' : 'Окупаемость'}</span>
+                    <strong>${roiDays ? `~${formatNumber(roiDays, locale)} ${isUa ? 'дн' : 'дн'}` : '—'}</strong>
+                </div>
+                <div class="shop-hero-sheet-stat stat-owned">
+                    <span>${isUa ? 'Ваших' : 'Ваших'}</span>
+                    <strong>${formatNumber(ownedCount, locale)}</strong>
+                </div>
             </div>
-            <p class="shop-hero-sheet-desc">${escapeHTML(localizedHero.description || '')}</p>
+            ${localizedHero.description ? `<p class="shop-hero-sheet-desc">${escapeHTML(localizedHero.description)}</p>` : ''}
             ${localizedHero.rules?.length ? `<div class="shop-hero-sheet-rules">${localizedHero.rules.map((rule) => `<span>${escapeHTML(rule)}</span>`).join('')}</div>` : ''}
             <div class="shop-hero-sheet-actions">
-                <button class="shop-sheet-buy" type="button" data-shop-sheet-buy="${hero.id}">${hero.isTestHero ? (isUa ? 'Отримати' : 'Получить') : heroText.buy}</button>
-                <button class="shop-sheet-close-btn" type="button" data-shop-sheet-close>${isUa ? 'Закрити' : 'Закрыть'}</button>
+                <button class="shop-sheet-buy" type="button" data-shop-sheet-buy="${hero.id}">${buyLabel}</button>
+                <button class="shop-sheet-close-btn" type="button" data-shop-sheet-close>${closeLabel}</button>
             </div>
         </section>
     `;
