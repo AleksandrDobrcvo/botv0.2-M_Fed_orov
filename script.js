@@ -3021,12 +3021,45 @@ function renderHomeDailyPlan({ activeHero, activeHeroName, activeEconomyHero, ha
 
     if (activeHero) {
         const countdown = activeEconomyHero?.countdown || '00:00:00';
-        if (title) title.textContent = cycleReady
-            ? (isUa ? `${activeHeroName}: прибуток готовий` : `${activeHeroName}: доход готов`)
-            : (isUa ? `${activeHeroName}: цикл ${formatNumber(cyclePercent, locale)}%` : `${activeHeroName}: цикл ${formatNumber(cyclePercent, locale)}%`);
-        if (heroStatus) heroStatus.textContent = cycleReady
-            ? (isUa ? 'Готово до збору' : 'Готов к сбору')
-            : (isUa ? `Майнить ${countdown}` : `Майнит ${countdown}`);
+        // Compute remaining ms; for long cycles (>24h), switch to day/hour view
+        let remainingMs = 0;
+        try {
+            const endRaw = activeEconomyHero?.cycleEndsAt || activeHero?.cycleEndsAt;
+            const endMs = endRaw ? new Date(endRaw).getTime() : 0;
+            remainingMs = endMs ? Math.max(0, endMs - Date.now()) : 0;
+        } catch (_) { remainingMs = 0; }
+        const isLongCycle = !cycleReady && remainingMs > 24 * 3600 * 1000;
+        const days = Math.floor(remainingMs / (24 * 3600 * 1000));
+        const hours = Math.floor((remainingMs % (24 * 3600 * 1000)) / (3600 * 1000));
+        const longLabel = isUa
+            ? `${formatNumber(days, locale)}д ${formatNumber(hours, locale)}г`
+            : `${formatNumber(days, locale)}д ${formatNumber(hours, locale)}ч`;
+
+        if (title) {
+            if (cycleReady) {
+                title.textContent = isUa
+                    ? `${activeHeroName}: прибуток готовий`
+                    : `${activeHeroName}: доход готов`;
+            } else if (isLongCycle) {
+                // Длинный цикл — не привязываем «план дня» к проценту цикла
+                title.textContent = isUa
+                    ? 'Майнінг працює — займіться щоденними справами'
+                    : 'Майнинг работает — займитесь дневными задачами';
+            } else {
+                title.textContent = isUa
+                    ? `${activeHeroName}: цикл ${formatNumber(cyclePercent, locale)}%`
+                    : `${activeHeroName}: цикл ${formatNumber(cyclePercent, locale)}%`;
+            }
+        }
+        if (heroStatus) {
+            if (cycleReady) {
+                heroStatus.textContent = isUa ? 'Готово до збору' : 'Готов к сбору';
+            } else if (isLongCycle) {
+                heroStatus.textContent = isUa ? `До збору ${longLabel}` : `До сбора ${longLabel}`;
+            } else {
+                heroStatus.textContent = isUa ? `Майнить ${countdown}` : `Майнит ${countdown}`;
+            }
+        }
         if (heroStep) heroStep.dataset.homeAction = 'mines';
     } else if (hasOwnedHeroes) {
         if (title) title.textContent = isUa ? 'Поставте героя на головний екран' : 'Поставьте героя на главный экран';
@@ -7209,7 +7242,19 @@ function renderHome() {
     }
     if (avatarBox) {
         const photoUrl = user.photoUrl || (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user && window.Telegram.WebApp.initDataUnsafe.user.photo_url) || '';
-        avatarBox.style.backgroundImage = photoUrl ? `url("${photoUrl}")` : '';
+        if (photoUrl) {
+            avatarBox.style.setProperty('background-image', `url("${photoUrl}")`, 'important');
+            avatarBox.style.setProperty('background-size', 'cover', 'important');
+            avatarBox.style.setProperty('background-position', 'center', 'important');
+            avatarBox.style.setProperty('background-repeat', 'no-repeat', 'important');
+            avatarBox.style.setProperty('background-color', 'transparent', 'important');
+        } else {
+            avatarBox.style.removeProperty('background-image');
+            avatarBox.style.removeProperty('background-size');
+            avatarBox.style.removeProperty('background-position');
+            avatarBox.style.removeProperty('background-repeat');
+            avatarBox.style.removeProperty('background-color');
+        }
         avatarBox.classList.toggle('has-photo', !!photoUrl);
     }
 

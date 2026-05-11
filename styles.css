@@ -22690,7 +22690,7 @@ body.is-home #home-stage .home-hero-plate {
     left: 50% !important;
     right: auto !important;
     top: auto !important;
-    bottom: calc(72px + env(safe-area-inset-bottom) + 96px) !important;
+    bottom: calc(72px + env(safe-area-inset-bottom) + 14px) !important;
     transform: translateX(-50%) !important;
     margin: 0 !important;
     z-index: 30 !important;
@@ -28288,6 +28288,14 @@ body.is-home .home-stage[data-rarity="empty"] #home-hero-cta.home-hero-cta .home
         inset 0 1px 0 rgba(255, 255, 255, .25) !important;
     flex: 0 0 auto !important;
 }
+#home-profile-chip .home-profile-avatar.has-photo {
+    background-color: transparent !important;
+    background-image: none;
+    background-size: cover !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+}
+#home-profile-chip .home-profile-avatar.has-photo > span { display: none !important; }
 #home-profile-chip .home-profile-avatar::after {
     content: '';
     position: absolute;
