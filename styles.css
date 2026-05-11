@@ -29935,3 +29935,52 @@ html.low-fx .shop-hero-sheet-v2 .shop-hero-sheet-art-glow { display: none; }
     .shop-hero-sheet-v2 .shop-hero-sheet-art { width: 88px; height: 88px; }
     .shop-hero-sheet-v2 .shop-hero-sheet-title { font-size: 19px; }
 }
+
+/* === Sticky top header on non-home pages (stats, shop, my-heroes, menu, etc.) === */
+body:not(.is-home) main.app-shell > header.hero-panel {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 80 !important;
+    background-color: rgba(8, 12, 28, 0.88) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.3) !important;
+    backdrop-filter: blur(24px) saturate(1.3) !important;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+html.android-fx body:not(.is-home) main.app-shell > header.hero-panel,
+html.low-fx body:not(.is-home) main.app-shell > header.hero-panel {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    background-color: rgba(10, 14, 32, 0.96) !important;
+}
+
+/* === Fix hero plate containing block: remove paint containment so position:fixed anchors to home-section (full viewport), not home-stage === */
+.home-stage,
+#home-stage,
+body.is-home .home-stage,
+body.is-home #home-stage,
+body.is-home .home-section .home-stage,
+body.is-home .home-section #home-stage {
+    contain: none !important;
+}
+
+/* === Hero plate sits flush above bottom nav === */
+body.is-home .home-section .home-stage .home-hero-plate,
+body.is-home .home-section #home-stage .home-hero-plate,
+body.is-home #home-stage .home-hero-plate,
+body.is-home .home-stage .home-hero-plate,
+body.is-home .home-section .home-stage[data-rarity]:not([data-rarity="empty"]) .home-hero-plate,
+body.is-home #home-stage[data-rarity]:not([data-rarity="empty"]) .home-hero-plate {
+    bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+}
+@media (max-height: 720px) {
+    body.is-home .home-section .home-stage[data-rarity]:not([data-rarity="empty"]) .home-hero-plate,
+    body.is-home #home-stage[data-rarity]:not([data-rarity="empty"]) .home-hero-plate {
+        bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+    }
+}
+@media (max-width: 420px) {
+    body.is-home .home-section .home-stage[data-rarity]:not([data-rarity="empty"]) .home-hero-plate,
+    body.is-home #home-stage[data-rarity]:not([data-rarity="empty"]) .home-hero-plate {
+        bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+    }
+}
