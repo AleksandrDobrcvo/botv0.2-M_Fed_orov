@@ -1042,6 +1042,11 @@ function initializeTelegramWebApp() {
     document.body.classList.add('telegram-webapp');
     tg.ready();
     tg.expand();
+    // Prevent vertical swipe-down that pulls the Telegram header into the viewport (Bot API 7.7+)
+    try {
+        if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+        if (typeof tg.isVerticalSwipesEnabled !== 'undefined') tg.isVerticalSwipesEnabled = false;
+    } catch (_) {}
     if (typeof tg.isVersionAtLeast === 'function' && tg.isVersionAtLeast('6.1')) {
         tg.setHeaderColor('#0e1625');
         tg.setBackgroundColor('#08111f');
@@ -5788,26 +5793,141 @@ function openExchangeModal() {
     const t = getTranslations();
     const user = window.gameDB.getUser();
     const rate = window.gameDB.getRnxRate();
-    window.openFormModal({
-        title: t.exchangeTitle,
-        sectionLabel: t.exchangeRate,
-        fields: [
-            { name: 'amount', label: `${t.exchangeAmountLabel} (${t.rnxBalanceLabel}: ${formatNumber(user.rnxBalance, 'ru-RU')})`, type: 'number', placeholder: String(rate), required: true }
-        ],
-        confirmText: t.exchangeButton,
-        onConfirm: (values) => {
-            const amount = Number(values.amount || 0);
-            if (!Number.isFinite(amount) || amount <= 0) {
-                return showNotification(t.formValidationError, 'error');
-            }
-            const result = window.gameDB.exchangeRnxToTon(user.id || '__current__', amount);
-            if (!result.success) {
-                return showNotification(t.insufficientRnx, 'error');
-            }
-            renderApp();
-            showNotification(`${t.exchangeSuccess}: +${result.buyTon.toFixed(4)} TON ${t.balanceBuyLabel}, +${result.withdrawTon.toFixed(4)} TON ${t.balanceWithdrawLabel}`, 'success', { persist: true });
+    const available = Math.max(0, Math.floor(Number(user.rnxBalance || 0)));
+    const withdrawRatio = Number(window.gameDB.data?.finance?.exchangeWithdrawRatio ?? 0.3);
+    const buyPct = Math.round((1 - withdrawRatio) * 100);
+    const withdrawPct = 100 - buyPct;
+
+    const modal = document.getElementById('exchange-modal');
+    if (!modal) return;
+    const titleEl = document.getElementById('exchange-modal-title');
+    const labelEl = document.getElementById('exchange-modal-label');
+    const balanceEl = document.getElementById('exchange-balance-value');
+    const resultEl = document.getElementById('exchange-result-value');
+    const amountInput = document.getElementById('exchange-amount-input');
+    const amountLabel = document.getElementById('exchange-amount-label');
+    const maxBtn = document.getElementById('exchange-max-btn');
+    const quickRow = document.getElementById('exchange-quick-row');
+    const buyKey = document.getElementById('exchange-split-buy-key');
+    const buyPctEl = document.getElementById('exchange-split-buy-pct');
+    const buyValEl = document.getElementById('exchange-split-buy-value');
+    const wdKey = document.getElementById('exchange-split-withdraw-key');
+    const wdPctEl = document.getElementById('exchange-split-withdraw-pct');
+    const wdValEl = document.getElementById('exchange-split-withdraw-value');
+    const buyBar = document.getElementById('exchange-split-bar-buy');
+    const wdBar = document.getElementById('exchange-split-bar-withdraw');
+    const warnEl = document.getElementById('exchange-warning');
+    const warnText = document.getElementById('exchange-warning-text');
+    const confirmBtn = document.getElementById('exchange-modal-confirm');
+    const cancelBtn = document.getElementById('exchange-modal-cancel');
+    const closeBtn = document.getElementById('exchange-modal-close');
+    const fromLabel = document.getElementById('exchange-from-label');
+    const toLabel = document.getElementById('exchange-to-label');
+    const balanceKey = document.getElementById('exchange-balance-key');
+
+    titleEl.textContent = t.exchangeTitle;
+    labelEl.textContent = t.exchangeRate;
+    amountLabel.textContent = t.exchangeAmountLabel;
+    confirmBtn.textContent = t.exchangeButton;
+    cancelBtn.textContent = t.cancelAction || 'Отмена';
+    fromLabel.textContent = (t.exchangeFromLabel || 'Отдаёте');
+    toLabel.textContent = (t.exchangeToLabel || 'Получаете');
+    balanceKey.textContent = (t.balanceLabel || 'Баланс');
+    buyKey.textContent = t.balanceBuyLabel;
+    wdKey.textContent = t.balanceWithdrawLabel;
+    buyPctEl.textContent = `${buyPct}%`;
+    wdPctEl.textContent = `${withdrawPct}%`;
+    buyBar.style.width = `${buyPct}%`;
+    wdBar.style.width = `${withdrawPct}%`;
+    balanceEl.textContent = formatNumber(available, 'ru-RU');
+    amountInput.value = '';
+    amountInput.placeholder = String(rate);
+    amountInput.max = String(available);
+    modal.classList.remove('exchange-error');
+    warnEl.classList.add('hidden');
+
+    const fmtTon = (v) => (Number.isFinite(v) ? v : 0).toFixed(4);
+
+    const update = (raw) => {
+        const num = Math.max(0, Math.floor(Number(raw) || 0));
+        const ton = num / rate;
+        const buyTon = ton * (1 - withdrawRatio);
+        const wdTon = ton * withdrawRatio;
+        resultEl.textContent = fmtTon(ton);
+        buyValEl.textContent = `${fmtTon(buyTon)} TON`;
+        wdValEl.textContent = `${fmtTon(wdTon)} TON`;
+
+        const tooMuch = num > available;
+        const zero = num <= 0;
+        if (tooMuch) {
+            modal.classList.add('exchange-error');
+            warnEl.classList.remove('hidden');
+            warnText.textContent = t.insufficientRnx;
+        } else {
+            modal.classList.remove('exchange-error');
+            warnEl.classList.add('hidden');
         }
-    });
+        confirmBtn.disabled = zero || tooMuch;
+
+        // highlight matching quick chip
+        const pct = available > 0 ? Math.round((num / available) * 100) : 0;
+        quickRow.querySelectorAll('.exchange-quick-btn').forEach((btn) => {
+            const v = Number(btn.dataset.quick);
+            btn.classList.toggle('is-active', v === pct && num > 0);
+        });
+    };
+
+    const onInput = (e) => update(e.target.value);
+    const onQuick = (e) => {
+        const btn = e.target.closest('.exchange-quick-btn');
+        if (!btn) return;
+        const pct = Number(btn.dataset.quick) / 100;
+        const val = Math.floor(available * pct);
+        amountInput.value = val;
+        update(val);
+        triggerHaptic('light');
+    };
+    const onMax = () => {
+        amountInput.value = available;
+        update(available);
+        triggerHaptic('light');
+    };
+    const close = () => {
+        amountInput.removeEventListener('input', onInput);
+        quickRow.removeEventListener('click', onQuick);
+        maxBtn.removeEventListener('click', onMax);
+        confirmBtn.onclick = null;
+        cancelBtn.onclick = null;
+        closeBtn.onclick = null;
+        modal.classList.remove('modal-active');
+        document.body.classList.remove('modal-open');
+    };
+    const submit = () => {
+        const amount = Math.floor(Number(amountInput.value) || 0);
+        if (amount <= 0 || amount > available) {
+            return showNotification(t.insufficientRnx, 'error');
+        }
+        const result = window.gameDB.exchangeRnxToTon(user.id || '__current__', amount);
+        if (!result.success) {
+            return showNotification(t.insufficientRnx, 'error');
+        }
+        close();
+        renderApp();
+        showNotification(`${t.exchangeSuccess}: +${result.buyTon.toFixed(4)} TON ${t.balanceBuyLabel}, +${result.withdrawTon.toFixed(4)} TON ${t.balanceWithdrawLabel}`, 'success', { persist: true });
+        triggerHaptic('success');
+    };
+
+    amountInput.addEventListener('input', onInput, { passive: true });
+    quickRow.addEventListener('click', onQuick);
+    maxBtn.addEventListener('click', onMax);
+    confirmBtn.onclick = submit;
+    cancelBtn.onclick = close;
+    closeBtn.onclick = close;
+
+    update(0);
+    modal.classList.add('modal-active');
+    document.body.classList.add('modal-open');
+    // Avoid auto-focus on mobile to prevent keyboard popping & overscroll
 }
 
 function openPromoCodeModal() {
@@ -7569,8 +7689,8 @@ function renderFirstRunOnboarding() {
             });
         });
         document.addEventListener('keydown', _onboardingKeyHandler);
-        window.addEventListener('resize', _onboardingResizeHandler);
-        window.addEventListener('scroll', _onboardingResizeHandler, true);
+        window.addEventListener('resize', _onboardingResizeHandler, { passive: true });
+        window.addEventListener('scroll', _onboardingResizeHandler, { capture: true, passive: true });
     }
 
     const steps = _getOnboardingSteps(isUa);
