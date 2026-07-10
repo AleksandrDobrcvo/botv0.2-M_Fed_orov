@@ -320,8 +320,8 @@ button {
 
 .bg-wallpaper {
     pointer-events: none;
-    background: url('images/bot_welcome.jpg') center top / cover no-repeat;
-    opacity: 0.55;
+    background: url('images/tronix_wallpaper.jpg') center top / cover no-repeat;
+    opacity: 0.75;
 }
 
 .modal-backdrop {

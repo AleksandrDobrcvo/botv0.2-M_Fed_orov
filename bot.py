@@ -9,6 +9,7 @@ import html
 import json
 import logging
 import os
+from dotenv import load_dotenv
 from datetime import datetime, timezone
 from urllib import error, request
 
@@ -17,11 +18,18 @@ from telegram.error import TelegramError
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # ─── Конфігурація ────────────────────────────────────────────────────────────
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8748324299:AAE-v-Kgfaq9ARPLU01vhXPKdOwrbg3ld1c")
+load_dotenv()
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("TELEGRAM_BOT_TOKEN not set. Set TELEGRAM_BOT_TOKEN in environment or in a local .env file")
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://botv0-1-m-fed-orov.vercel.app")
 WELCOME_PHOTO = "images/bot_welcome.jpg"               # локальний шлях АБО file_id після першого відправлення
 FIREBASE_DATABASE_URL = os.environ.get("FIREBASE_DATABASE_URL", "https://mfedorov-521cc-default-rtdb.firebaseio.com")
 NOTIFICATION_POLL_SECONDS = max(10, int(os.environ.get("NOTIFICATION_POLL_SECONDS", "15")))
+
+logger = logging.getLogger(__name__)
+logger.info("Loaded configuration: WEBAPP_URL=%s", WEBAPP_URL)
+logger.info("Telegram token loaded: %s", "yes" if BOT_TOKEN else "no")
 NOTIFICATION_BATCH_SIZE = max(1, int(os.environ.get("NOTIFICATION_BATCH_SIZE", "8")))
 
 logging.basicConfig(
@@ -314,6 +322,7 @@ def build_keyboard(is_ua: bool = True, ref_code: str | None = None) -> InlineKey
     news_label = "📢 Новини" if is_ua else "📢 Новости"
     chat_label = "💬 Чат"
 
+    logger.info("Building keyboard with WEBAPP_URL=%s", webapp_url)
     keyboard = [
         [InlineKeyboardButton(open_label, web_app=WebAppInfo(url=webapp_url))],
         [

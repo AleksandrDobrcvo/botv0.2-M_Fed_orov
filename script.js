@@ -9476,7 +9476,7 @@ function renderShop() {
                 <div class="shop-cinematic-visual">
                     <div class="shop-cinematic-glow"></div>
                     <div class="shop-cinematic-badge">ARMORY</div>
-                    <img class="shop-cinematic-figure" src="images/bot_welcome.jpg" alt="" loading="lazy" decoding="async">
+                    <img class="shop-cinematic-figure" src="images/tronix_wallpaper.jpg" alt="" loading="lazy" decoding="async">
                 </div>
             `;
             const head = shopSection.querySelector('.shop-head');
@@ -9546,7 +9546,7 @@ function renderShop() {
         const featuredLocalized = featuredInsight?.localizedHero || (featuredHero ? getLocalizedHeroData(featuredHero) : null);
         const featuredOwnedCount = featuredHero ? ownedHeroes.filter((item) => item.heroId === featuredHero.id || item.id === featuredHero.id).length : 0;
         const featuredRoi = featuredInsight && Number.isFinite(featuredInsight.roiDays) ? `~${formatNumber(featuredInsight.roiDays, locale)} ${isUa ? 'дн' : 'дн'}` : '—';
-        const featuredImage = featuredLocalized?.image || 'images/bot_welcome.jpg';
+        const featuredImage = featuredLocalized?.image || 'images/tronix_wallpaper.jpg';
         const featuredModel = featuredLocalized?.model || featuredHero?.model || '';
         showcase.innerHTML = featuredHero ? `
             <div class="shop-showcase-copy">
