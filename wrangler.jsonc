@@ -19,6 +19,7 @@
   },
   "vars": {
     "FIREBASE_DATABASE_URL": "https://mfedorov-521cc-default-rtdb.firebaseio.com",
-    "NOTIFICATION_BATCH_SIZE": "8"
+    "NOTIFICATION_BATCH_SIZE": "8",
+    "WEBAPP_URL": "https://tronix-game-app.malinovskij280584.workers.dev/"
   }
 }
