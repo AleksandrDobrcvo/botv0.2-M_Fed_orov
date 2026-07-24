@@ -998,9 +998,9 @@ class GameDatabase {
         return {
             // admin access
             accessGrantedTitle: isUa ? 'Доступ адміністратора видано' : 'Доступ администратора выдан',
-            accessGrantedMsg: isUa ? 'Вам відкрито доступ до панелі керування RoboNexus.' : 'Вам открыт доступ к панели управления RoboNexus.',
+            accessGrantedMsg: isUa ? 'Вам відкрито доступ до панелі керування TRONIX.' : 'Вам открыт доступ к панели управления TRONIX.',
             accessRevokedTitle: isUa ? 'Доступ адміністратора знято' : 'Доступ администратора снят',
-            accessRevokedMsg: isUa ? 'Ваш доступ до панелі керування RoboNexus відключено.' : 'Ваш доступ к панели управления RoboNexus отключён.',
+            accessRevokedMsg: isUa ? 'Ваш доступ до панелі керування TRONIX відключено.' : 'Ваш доступ к панели управления TRONIX отключён.',
             // referral
             newReferralTitle: isUa ? 'Новий реферал' : 'Новый реферал',
             newReferralMsg: (rnx) => isUa
@@ -1049,8 +1049,8 @@ class GameDatabase {
             // support reply
             supportReplyTitle: isUa ? 'Відповідь на тікет' : 'Ответ на тикет',
             supportReplyMsg: (subject) => isUa
-                ? `Нова відповідь на ваш тікет «${subject}». Відкрийте RoboNexus, щоб переглянути.`
-                : `Новый ответ на ваш тикет «${subject}». Откройте RoboNexus, чтобы посмотреть.`,
+                ? `Нова відповідь на ваш тікет «${subject}». Відкрийте TRONIX, щоб переглянути.`
+                : `Новый ответ на ваш тикет «${subject}». Откройте TRONIX, чтобы посмотреть.`,
             supportClosedTitle: isUa ? 'Тікет закрито' : 'Тикет закрыт',
             supportClosedMsg: (subject) => isUa
                 ? `Тікет «${subject}» закрито адміністратором.`

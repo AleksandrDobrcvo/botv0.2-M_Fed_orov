@@ -1,5 +1,5 @@
 """
-RoboNexus Telegram Bot — Backend
+TRONIX Telegram Bot — Backend
 Запуск: python bot.py
 Залежності: pip install python-telegram-bot==21.10
 """
@@ -22,7 +22,7 @@ load_dotenv()
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("TELEGRAM_BOT_TOKEN not set. Set TELEGRAM_BOT_TOKEN in environment or in a local .env file")
-WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://botv0-1-m-fed-orov.vercel.app")
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://AleksandrDobrcvo.github.io/botv0.2-M_Fed_orov/")
 WELCOME_PHOTO = "images/bot_welcome.jpg"               # локальний шлях АБО file_id після першого відправлення
 FIREBASE_DATABASE_URL = os.environ.get("FIREBASE_DATABASE_URL", "https://mfedorov-521cc-default-rtdb.firebaseio.com")
 NOTIFICATION_POLL_SECONDS = max(10, int(os.environ.get("NOTIFICATION_POLL_SECONDS", "15")))
@@ -41,14 +41,14 @@ logger = logging.getLogger(__name__)
 # ─── Переклади для бот-повідомлень ───────────────────────────────────────────
 _T = {
     "ru": {
-        "notification": "Уведомление RoboNexus",
+        "notification": "Уведомление TRONIX",
         "new_event": "У вас новое событие в аккаунте.",
         "footer_success": "Изменения уже применены в вашем аккаунте.",
         "footer_error": "Проверьте детали в приложении и при необходимости повторите действие.",
-        "footer_support": "Откройте RoboNexus, чтобы ответить или посмотреть переписку.",
-        "footer_info": "Откройте RoboNexus, чтобы посмотреть подробности.",
+        "footer_support": "Откройте TRONIX, чтобы ответить или посмотреть переписку.",
+        "footer_info": "Откройте TRONIX, чтобы посмотреть подробности.",
         "time_label": "Время",
-        "open_app": "Открыть RoboNexus",
+        "open_app": "Открыть TRONIX",
         "amount": "Сумма",
         "accrual": "Начисление",
         "heroes_count": "Героев с выплатой",
@@ -61,14 +61,14 @@ _T = {
         "op_withdraw": "Вывод",
     },
     "ua": {
-        "notification": "Сповіщення RoboNexus",
+        "notification": "Сповіщення TRONIX",
         "new_event": "У вас нова подія в акаунті.",
         "footer_success": "Зміни вже застосовано у вашому акаунті.",
         "footer_error": "Перевірте деталі в додатку та за потреби повторіть дію.",
-        "footer_support": "Відкрийте RoboNexus, щоб відповісти або переглянути листування.",
-        "footer_info": "Відкрийте RoboNexus, щоб переглянути подробиці.",
+        "footer_support": "Відкрийте TRONIX, щоб відповісти або переглянути листування.",
+        "footer_info": "Відкрийте TRONIX, щоб переглянути подробиці.",
         "time_label": "Час",
-        "open_app": "Відкрити RoboNexus",
+        "open_app": "Відкрити TRONIX",
         "amount": "Сума",
         "accrual": "Нарахування",
         "heroes_count": "Героїв з виплатою",
@@ -93,7 +93,7 @@ def _t(note: dict, key: str) -> str:
 
 
 WELCOME_TEXT_UA = (
-    "🚀 <b>Ласкаво просимо до RoboNexus!</b> 🤖\n\n"
+    "🚀 <b>Ласкаво просимо до TRONIX!</b> 🤖\n\n"
     "Світ роботів та прибутку вже відкритий для тебе.\n\n"
     "У тебе є можливість:\n\n"
     "🤖 Купувати героїв\n"
@@ -102,11 +102,11 @@ WELCOME_TEXT_UA = (
     "🤝 Заробляти з партнерської програми\n\n"
     "🎁 Новим користувачам доступний тестовий герой.\n\n"
     "👇 Натискай кнопку нижче та розпочинай гру.\n\n"
-    "💎 <b>RoboNexus</b> — твоя кібер-імперія стартує зараз."
+    "💎 <b>TRONIX</b> — твоя кібер-імперія стартує зараз."
 )
 
 WELCOME_TEXT_RU = (
-    "🚀 <b>Добро пожаловать в RoboNexus!</b> 🤖\n\n"
+    "🚀 <b>Добро пожаловать в TRONIX!</b> 🤖\n\n"
     "Мир роботов и прибыли уже открыт для тебя.\n\n"
     "У тебя есть возможность:\n\n"
     "🤖 Покупать героев\n"
@@ -115,7 +115,7 @@ WELCOME_TEXT_RU = (
     "🤝 Зарабатывать с партнёрской программы\n\n"
     "🎁 Новым пользователям доступен тестовый герой.\n\n"
     "👇 Нажимай кнопку ниже и начинай игру.\n\n"
-    "💎 <b>RoboNexus</b> — твоя кибер-империя стартует сейчас."
+    "💎 <b>TRONIX</b> — твоя кибер-империя стартует сейчас."
 )
 
 
@@ -318,7 +318,7 @@ def build_keyboard(is_ua: bool = True, ref_code: str | None = None) -> InlineKey
     if ref_code:
         webapp_url = f"{WEBAPP_URL}?ref={ref_code}"
 
-    open_label = "🎮 Відкрити RoboNexus" if is_ua else "🎮 Открыть RoboNexus"
+    open_label = "🎮 Відкрити TRONIX" if is_ua else "🎮 Открыть TRONIX"
     news_label = "📢 Новини" if is_ua else "📢 Новости"
     chat_label = "💬 Чат"
 
@@ -326,8 +326,8 @@ def build_keyboard(is_ua: bool = True, ref_code: str | None = None) -> InlineKey
     keyboard = [
         [InlineKeyboardButton(open_label, web_app=WebAppInfo(url=webapp_url))],
         [
-            InlineKeyboardButton(news_label, url="https://t.me/RoboNexusOfficial"),
-            InlineKeyboardButton(chat_label, url="https://t.me/RoboNexus_bots"),
+            InlineKeyboardButton(news_label, url="https://t.me/Tronix_team"),
+            InlineKeyboardButton(chat_label, url="https://t.me/Tronix_team"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -369,7 +369,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 def main() -> None:
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
-    logger.info("RoboNexus Bot запущено...")
+    logger.info("TRONIX Bot запущено...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
@@ -384,7 +384,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 WELCOME_TEXT = (
-    "🚀 <b>Ласкаво просимо до RoboNexus!</b> 🤖\n\n"
+    "🚀 <b>Ласкаво просимо до TRONIX!</b> 🤖\n\n"
     "Світ роботів та прибутку вже відкритий для тебе.\n\n"
     "У тебе є можливість:\n\n"
     "🤖 Купувати героїв\n"
@@ -393,7 +393,7 @@ WELCOME_TEXT = (
     "🤝 Заробляти з партнерської програми\n\n"
     "🎁 Новим користувачам доступний тестовий герой.\n\n"
     "👇 Натискай кнопку нижче та розпочинай гру.\n\n"
-    "💎 <b>RoboNexus</b> — твоя кібер-імперія стартує зараз."
+    "💎 <b>TRONIX</b> — твоя кібер-імперія стартує зараз."
 )
 
 
@@ -478,11 +478,11 @@ def build_notification_message(note: dict) -> str:
     footer = {
         "success": "Изменения уже применены в вашем аккаунте.",
         "error": "Проверьте детали в приложении и при необходимости повторите действие.",
-        "support": "Откройте RoboNexus, чтобы ответить или посмотреть переписку.",
-        "info": "Откройте RoboNexus, чтобы посмотреть подробности.",
-    }.get(kind, "Откройте RoboNexus, чтобы посмотреть подробности.")
+        "support": "Откройте TRONIX, чтобы ответить или посмотреть переписку.",
+        "info": "Откройте TRONIX, чтобы посмотреть подробности.",
+    }.get(kind, "Откройте TRONIX, чтобы посмотреть подробности.")
 
-    title = html.escape(str(note.get("title") or "Уведомление RoboNexus"))
+    title = html.escape(str(note.get("title") or "Уведомление TRONIX"))
     message = html.escape(str(note.get("message") or "У вас новое событие в аккаунте."))
     created_at = format_datetime_label(str(note.get("createdAt") or ""))
     details = build_details(note)
@@ -502,7 +502,7 @@ def build_notification_message(note: dict) -> str:
         f"<b>Время:</b> <code>{html.escape(created_at)}</code>",
         footer,
         "",
-        f"<a href=\"{html.escape(WEBAPP_URL, quote=True)}\">Открыть RoboNexus</a>",
+        f"<a href=\"{html.escape(WEBAPP_URL, quote=True)}\">Открыть TRONIX</a>",
     ])
     return "\n".join(parts)
 
@@ -601,13 +601,13 @@ def build_keyboard(ref_code: str | None = None) -> InlineKeyboardMarkup:
     keyboard = [
         [
             InlineKeyboardButton(
-                "🎮 Відкрити RoboNexus",
+                "🎮 Відкрити TRONIX",
                 web_app=WebAppInfo(url=webapp_url)
             )
         ],
         [
-            InlineKeyboardButton("📢 Новини", url="https://t.me/RoboNexusOfficial"),
-            InlineKeyboardButton("💬 Чат",    url="https://t.me/RoboNexus_bots"),
+            InlineKeyboardButton("📢 Новини", url="https://t.me/Tronix_team"),
+            InlineKeyboardButton("💬 Чат",    url="https://t.me/Tronix_team"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -646,7 +646,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 def main() -> None:
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
-    logger.info("RoboNexus Bot запущено...")
+    logger.info("TRONIX Bot запущено...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

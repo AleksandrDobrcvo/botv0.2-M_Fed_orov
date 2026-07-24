@@ -3,3 +3,6 @@ Thumbs.db
 *.log
 .vercel
 .env
+dist/
+node_modules/
+tronix-cloudflare-pages-*.zip

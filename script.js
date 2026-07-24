@@ -1,8 +1,8 @@
 const LOCALES = {
     ru: {
         eyebrow: 'Профиль Telegram WebApp',
-        gameTitle: 'RoboNexus',
-        heroSubtitle: 'Чистый профиль игрока с нулевым стартом, мягкой анимацией и нормальной локализацией.',
+        gameTitle: 'TRONIX',
+        heroSubtitle: 'Чистый профиль игрока в стиле TRONIX с мягкой анимацией и аккуратной локализацией.',
         balance: 'Баланс',
         balanceHint: 'Двойной тап обнуляет',
         rating: 'Рейтинг',
@@ -314,8 +314,8 @@ const LOCALES = {
     },
     ua: {
         eyebrow: 'Профіль Telegram WebApp',
-        gameTitle: 'RoboNexus',
-        heroSubtitle: 'Чистий профіль гравця з нульовим стартом, мʼякою анімацією та нормальною локалізацією.',
+        gameTitle: 'TRONIX',
+        heroSubtitle: 'Чистий профіль гравця в стилі TRONIX з мʼякою анімацією та охайною локалізацією.',
         balance: 'Баланс',
         balanceHint: 'Подвійний тап скидає',
         rating: 'Рейтинг',
@@ -1932,7 +1932,7 @@ function renderApp() {
         if (_refLblEl) _refLblEl.textContent = _isUaRef ? 'Реферальне посилання' : 'Реферальная ссылка';
         if (_refCopyText) _refCopyText.textContent = _isUaRef ? 'Копіювати' : 'Копировать';
         const _refCode = user.referralCode || '';
-        const _refLink = _refCode ? getReferralBotLink(_refCode) : 'https://t.me/RoboNexusBot';
+        const _refLink = _refCode ? getReferralBotLink(_refCode) : 'https://t.me/TronixBot';
         if (_refDisplay) _refDisplay.textContent = _refLink.replace('https://', '');
         if (_refBlock && _refCopyBtn) {
             const _handler = async () => {
@@ -1968,7 +1968,7 @@ function renderApp() {
             _onboardBanner.innerHTML = `
                 <div class="onboarding-icon">🤖</div>
                 <div class="onboarding-body">
-                    <strong>${_isUaOb ? 'Ласкаво просимо до RoboNexus!' : 'Добро пожаловать в RoboNexus!'}</strong>
+                    <strong>${_isUaOb ? 'Ласкаво просимо до TRONIX!' : 'Добро пожаловать в TRONIX!'}</strong>
                     <span>${_isUaOb ? 'Поповни баланс → купи героя → починай майнити RNX та заробляти TON.' : 'Пополни баланс → купи героя → начни майнить RNX и зарабатывать TON.'}</span>
                 </div>
                 <button class="onboarding-cta-btn" type="button" onclick="document.querySelector('[data-nav=\\'shop\\']')?.click()">${_isUaOb ? 'До магазину →' : 'В магазин →'}</button>`;
@@ -2615,7 +2615,7 @@ function getHeroTextSet() {
         menuUpdatesCurrent: isUa ? 'Актуально' : 'Актуально',
         menuUpdatesArchive: isUa ? 'Архів' : 'Архив',
         menuUpdatesBadge: 'Release Log',
-        menuUpdatesModalTitle: isUa ? 'Усі релізи та покращення RoboNexus' : 'Все релизы и улучшения RoboNexus',
+        menuUpdatesModalTitle: isUa ? 'Усі релізи та покращення TRONIX' : 'Все релизы и улучшения TRONIX',
         menuHistory: isUa ? 'Історія' : 'История',
         menuAudit: isUa ? 'Аудит' : 'Аудит',
         menuSupport: isUa ? 'Підтримка' : 'Поддержка',
@@ -2627,7 +2627,7 @@ function getHeroTextSet() {
         menuSummaryAlerts: isUa ? 'Нові' : 'Новые',
         menuSummarySynergy: isUa ? 'Синергія' : 'Синергия',
         menuSupportBannerTitle: isUa ? 'Підтримка проєкту' : 'Поддержка проекта',
-        menuSupportBannerSubtitle: isUa ? '@RoboNexus_team · Адміністрація та допомога' : '@RoboNexus_team · Администрация и помощь',
+        menuSupportBannerSubtitle: isUa ? '@Tronix_team · Адміністрація та допомога' : '@Tronix_team · Администрация и помощь',
         allRarities: isUa ? 'Усі рідкості' : 'Все редкости',
         common: isUa ? 'Звичайний' : 'Обычный',
         rare: isUa ? 'Рідкісний' : 'Редкий',
@@ -2829,7 +2829,7 @@ function syncHeaderDensity(type) {
         menu:    getCurrentLanguage() === 'ua' ? 'Центр керування' : 'Центр управления',
     };
     const _labelEl = document.querySelector('.hero-head-main .section-label');
-    if (_labelEl) _labelEl.textContent = _sectionLabels[type] || 'RoboNexus';
+    if (_labelEl) _labelEl.textContent = _sectionLabels[type] || 'TRONIX';
 }
 
 function getHeroSynergySummary(heroes) {
@@ -3236,7 +3236,7 @@ function renderMenuDashboard() {
                 ${menuSummary.map((item) => `<div class="menu-dashboard-mini-chip"><span>${item.label}</span><strong>${item.value}</strong></div>`).join('')}
             </div>
         </div>
-        <a href="https://t.me/RoboNexus_team" target="_blank" rel="noopener noreferrer" class="menu-support-banner">
+        <a href="https://t.me/Tronix_team" target="_blank" rel="noopener noreferrer" class="menu-support-banner">
             <div class="menu-support-banner-icon">
                 <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm5.94 8.19l-2.03 9.57c-.15.67-.54.84-1.09.52l-3-2.21-1.45 1.4c-.16.16-.3.3-.6.3l.21-3.06 5.5-4.97c.24-.21-.05-.33-.37-.12L7.06 14.5l-2.96-.93c-.64-.2-.65-.64.14-.95l11.57-4.46c.53-.19 1 .13 1.03.63z"/></svg>
             </div>
@@ -3959,7 +3959,7 @@ function _taskActionInfo(task, user) {
         return { label: isUa ? 'До ферми' : 'К ферме', action: () => navigateTo('mines') };
     }
     if (/telegram|subscribe|follow|channel|group|join|соц|підпис/.test(combined)) {
-        return { label: isUa ? 'Відкрити' : 'Открыть', action: () => window.open('https://t.me/RoboNexus_team', '_blank', 'noopener,noreferrer') };
+        return { label: isUa ? 'Відкрити' : 'Открыть', action: () => window.open('https://t.me/Tronix_team', '_blank', 'noopener,noreferrer') };
     }
     return { label: isUa ? 'Підтримка' : 'Поддержка', action: () => openSupportModal() };
 }
@@ -6016,7 +6016,7 @@ function openAdminCreatePromoModal() {
 }
 
 function getReferralBotLink(referralCode) {
-    return `https://t.me/RoboNexusBot?start=ref_${referralCode}`;
+return `https://t.me/TronixBot?start=ref_${referralCode}`;
 }
 
 function renderReferralSection() {
@@ -7258,7 +7258,7 @@ function renderHome() {
     const nameEl = document.getElementById('home-profile-name');
     const lvlEl = document.getElementById('home-profile-lvl');
     const avatarBox = document.getElementById('home-profile-avatar');
-    const username = user.username || user.firstName || 'RoboNexus';
+    const username = user.username || user.firstName || 'TRONIX';
     if (nameEl) nameEl.textContent = username;
     const lvlNumEl = document.getElementById('home-profile-lvl-num');
     if (lvlNumEl) {
@@ -7556,7 +7556,7 @@ function _getOnboardingSteps(isUa) {
     // `placement` hint: 'top' | 'bottom' | 'left' | 'right' | 'center'.
     return isUa
         ? [
-            { icon: '👋', kicker: 'ЛАСКАВО ПРОСИМО', title: 'Знайомство з RoboNexus', text: 'Швидкий тур інтерфейсом — покажемо ключові кнопки прямо на екрані. Можна перемкнути мову нижче.', point: 'Старт', placement: 'center', showLang: true },
+            { icon: '👋', kicker: 'ЛАСКАВО ПРОСИМО', title: 'Знайомство з TRONIX', text: 'Швидкий тур інтерфейсом — покажемо ключові кнопки прямо на екрані. Можна перемкнути мову нижче.', point: 'Старт', placement: 'center', showLang: true },
             { icon: '🤖', kicker: 'КРОК 1', title: 'Ваш головний герой', text: 'У центрі — активний бот. Він майнить $RNX і показує добовий прибуток. Натисніть, щоб обрати іншого.', point: 'Герой', target: '#home-stage', placement: 'bottom', nav: 'home' },
             { icon: '💰', kicker: 'КРОК 2', title: 'Баланс TON та $RNX', text: 'Тут зібрано основні валюти. Натисніть «+» щоб поповнити TON або обміняти $RNX.', point: 'Баланс', target: '.home-bal-row', placement: 'bottom', nav: 'home' },
             { icon: '🛒', kicker: 'КРОК 3', title: 'Магазин героїв', text: 'У магазині купують нових ботів — більше героїв означає більший пасивний дохід.', point: 'Магазин', target: '[data-nav="shop"]', placement: 'top', nav: 'home' },
@@ -7565,7 +7565,7 @@ function _getOnboardingSteps(isUa) {
             { icon: '🚀', kicker: 'ФІНАЛ', title: 'Все готово!', text: 'Завдання, повідомлення та друзі — все в один дотик з головного екрана. Успіхів!', point: 'Готово', placement: 'center' }
         ]
         : [
-            { icon: '👋', kicker: 'ДОБРО ПОЖАЛОВАТЬ', title: 'Знакомство с RoboNexus', text: 'Короткий тур по интерфейсу — покажем ключевые кнопки прямо на экране. Язык можно поменять ниже.', point: 'Старт', placement: 'center', showLang: true },
+            { icon: '👋', kicker: 'ДОБРО ПОЖАЛОВАТЬ', title: 'Знакомство с TRONIX', text: 'Короткий тур по интерфейсу — покажем ключевые кнопки прямо на экране. Язык можно поменять ниже.', point: 'Старт', placement: 'center', showLang: true },
             { icon: '🤖', kicker: 'ШАГ 1', title: 'Ваш главный герой', text: 'В центре — активный бот. Он майнит $RNX и показывает суточный доход. Нажмите, чтобы выбрать другого.', point: 'Герой', target: '#home-stage', placement: 'bottom', nav: 'home' },
             { icon: '💰', kicker: 'ШАГ 2', title: 'Баланс TON и $RNX', text: 'Здесь основные валюты. Жмите «+», чтобы пополнить TON или обменять $RNX.', point: 'Баланс', target: '.home-bal-row', placement: 'bottom', nav: 'home' },
             { icon: '🛒', kicker: 'ШАГ 3', title: 'Магазин героев', text: 'В магазине покупают новых ботов — больше героев = больше пассивного дохода.', point: 'Магазин', target: '[data-nav="shop"]', placement: 'top', nav: 'home' },
@@ -8381,8 +8381,8 @@ function _renderSupportMainView(body) {
     const user = window.gameDB.getUser();
     const isUa = getCurrentLanguage() === 'ua';
 
-    const ADMIN_TG = '@RoboNexus_team';
-    const ADMIN_TG_URL = 'https://t.me/RoboNexus_team';
+    const ADMIN_TG = '@Tronix_team';
+    const ADMIN_TG_URL = 'https://t.me/Tronix_team';
 
     const quickTopics = [
         { icon: '💳', label: isUa ? 'Поповнення' : 'Пополнение', bg: 'rgba(52,211,153,0.15)', subject: isUa ? 'Поповнення балансу' : 'Пополнение баланса', category: 'finance' },
@@ -8474,7 +8474,7 @@ function _renderSupportMainView(body) {
                 <svg viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2" width="20" height="20"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             </div>
             <div class="support-disclaimer-text">
-                <strong>${isUa ? 'Офіційна підтримка RoboNexus' : 'Официальная поддержка RoboNexus'}</strong>
+                <strong>${isUa ? 'Офіційна підтримка TRONIX' : 'Официальная поддержка TRONIX'}</strong>
                 <p>${isUa ? 'Ми ніколи не пишемо першими. Будь уважним до шахраїв!' : 'Мы никогда не пишем первыми. Будь осторожен с мошенниками!'}</p>
             </div>
         </div>
@@ -9148,8 +9148,8 @@ const HEROES = [
             { ru: 'Прибыль начисляется только на баланс покупок', ua: 'Прибуток зараховується лише на баланс покупок' }
         ],
         description: {
-            ru: 'Базовый стартовый робот для первого знакомства с RoboNexus. Помогает быстро войти в систему и начать зарабатывать. Доступен один раз. Прибыль только на баланс покупок.',
-            ua: 'Базовий стартовий робот для першого знайомства з RoboNexus. Допомагає швидко увійти в систему та почати заробляти. Доступний один раз. Прибуток лише на баланс покупок.'
+            ru: 'Базовый стартовый робот для первого знакомства с TRONIX. Помогает быстро войти в систему и начать зарабатывать. Доступен один раз. Прибыль только на баланс покупок.',
+            ua: 'Базовий стартовий робот для першого знайомства з TRONIX. Допомагає швидко увійти в систему та почати заробляти. Доступний один раз. Прибуток лише на баланс покупок.'
         },
         palette: ['#0a1f15', '#10b981', '#34d399'],
         image: 'images/hero_starter.png',
@@ -9259,8 +9259,8 @@ const HEROES = [
         growthRate: 0,
         baseUpgradePrice: 60,
         description: {
-            ru: 'Легендарный космический герой с наивысшим уровнем силы. Генерирует максимальный доход во всей системе RoboNexus.',
-            ua: 'Легендарний космічний герой із найвищим рівнем сили. Генерує максимальний прибуток у всій системі RoboNexus.'
+            ru: 'Легендарный космический герой с наивысшим уровнем силы. Генерирует максимальный доход во всей системе TRONIX.',
+            ua: 'Легендарний космічний герой із найвищим рівнем сили. Генерує максимальний прибуток у всій системі TRONIX.'
         },
         palette: ['#1f2937', '#b91c1c', '#fde68a'],
         image: 'images/hero_stellar_prime.png'
@@ -9459,7 +9459,7 @@ function renderShop() {
             shopHero.className = 'shop-cinematic-banner';
             shopHero.innerHTML = `
                 <div class="shop-cinematic-copy">
-                    <span class="shop-cinematic-kicker">ROBONEXUS ARMORY</span>
+                    <span class="shop-cinematic-kicker">TRONIX ARMORY</span>
                     <h3 class="shop-cinematic-title">${isUa ? 'Вітрина героїв нового покоління' : 'Витрина героев нового поколения'}</h3>
                     <p class="shop-cinematic-subtitle">${isUa ? 'Обирайте бійців, титанов і легенд з єдиної преміальної колекції та збирайте власний прибутковий загін.' : 'Выбирайте бойцов, титанов и легенд из единой премиальной коллекции и собирайте собственный прибыльный отряд.'}</p>
                     <div class="shop-cinematic-chips">
@@ -9476,7 +9476,7 @@ function renderShop() {
                 <div class="shop-cinematic-visual">
                     <div class="shop-cinematic-glow"></div>
                     <div class="shop-cinematic-badge">ARMORY</div>
-                    <img class="shop-cinematic-figure" src="images/tronix_wallpaper.jpg" alt="" loading="lazy" decoding="async">
+                    <img class="shop-cinematic-figure" src="images/tronix_wallpaper.jpg?v=2" alt="" loading="lazy" decoding="async">
                 </div>
             `;
             const head = shopSection.querySelector('.shop-head');
@@ -9546,7 +9546,7 @@ function renderShop() {
         const featuredLocalized = featuredInsight?.localizedHero || (featuredHero ? getLocalizedHeroData(featuredHero) : null);
         const featuredOwnedCount = featuredHero ? ownedHeroes.filter((item) => item.heroId === featuredHero.id || item.id === featuredHero.id).length : 0;
         const featuredRoi = featuredInsight && Number.isFinite(featuredInsight.roiDays) ? `~${formatNumber(featuredInsight.roiDays, locale)} ${isUa ? 'дн' : 'дн'}` : '—';
-        const featuredImage = featuredLocalized?.image || 'images/tronix_wallpaper.jpg';
+        const featuredImage = featuredLocalized?.image || 'images/tronix_wallpaper.jpg?v=2';
         const featuredModel = featuredLocalized?.model || featuredHero?.model || '';
         showcase.innerHTML = featuredHero ? `
             <div class="shop-showcase-copy">
