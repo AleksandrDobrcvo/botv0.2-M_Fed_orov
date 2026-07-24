@@ -1,0 +1,10 @@
+.git
+.github
+.venv
+.qoder
+.vscode
+.env
+dist
+tests
+*.log
+*.zip

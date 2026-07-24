@@ -6,3 +6,4 @@ Thumbs.db
 dist/
 node_modules/
 tronix-cloudflare-pages-*.zip
+.env*
